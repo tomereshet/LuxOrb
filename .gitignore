@@ -1,0 +1,12 @@
+node_modules/
+
+# Android build artifacts
+android/.gradle/
+android/build/
+android/app/build/
+android/capacitor-cordova-android-plugins/build/
+android/local.properties
+
+# Signing key — keep off public repos
+android/*.keystore
+android/*.jks

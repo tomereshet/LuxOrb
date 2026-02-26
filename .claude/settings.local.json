@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir:*)",
+      "Bash(node --version:*)",
+      "Bash(npm --version:*)",
+      "Bash(npm init:*)",
+      "Bash(npm install:*)",
+      "Bash(npx cap:*)",
+      "Bash(adb devices:*)",
+      "Bash(\"/c/Users/naama/AppData/Local/Android/Sdk/emulator/adb\" devices)",
+      "Bash(./gradlew assembleDebug:*)",
+      "Bash(ADB=/c/Users/naama/AppData/Local/Android/Sdk2/platform-tools/adb.exe)",
+      "Bash($ADB kill-server)",
+      "Bash($ADB start-server)",
+      "Bash($ADB devices)",
+      "Bash($ADB install -r /c/Users/naama/dev/OrbGame/android/app/build/outputs/apk/debug/app-debug.apk)",
+      "Bash(/c/Users/naama/AppData/Local/Android/Sdk2/platform-tools/adb.exe install:*)",
+      "Bash(C:/Users/naama/AppData/Local/Android/Sdk2/platform-tools/adb.exe install:*)",
+      "Bash(C:/Users/naama/AppData/Local/Android/Sdk2/platform-tools/adb.exe:*)",
+      "Bash(\"$ADB\" uninstall com.orbgame.app)",
+      "Bash(\"$ADB\" install /c/Users/naama/dev/OrbGame/android/app/build/outputs/apk/debug/app-debug.apk)",
+      "Bash(/c/Users/naama/AppData/Local/Android/Sdk2/platform-tools/adb.exe devices)",
+      "Bash(xargs grep -l \"app_name\")",
+      "Bash(./gradlew bundleRelease)",
+      "Bash(keytool -genkeypair -alias luxorb -keyalg RSA -keysize 2048 -validity 10000 -keystore \"c:/Users/naama/dev/OrbGame/android/luxorb-release.keystore\" -storepass \"GLORBWasBetter\" -keypass \"GLORBWasBetter\" -dname \"CN=Tomer Eshet Arava, OU=LUXORB, O=LUXORB, L=Unknown, ST=Unknown, C=IL\")",
+      "Bash(git init)",
+      "Bash(git remote add origin https://github.com/tomereshet/LuxOrb.git)",
+      "Bash(git add .)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\naama\\.claude\\projects\\c--Users-naama-dev-OrbGame\\memory",
+      "C:\\Users\\naama\\AppData\\Local\\Android\\Sdk2\\platforms\\android-35"
+    ]
+  }
+}

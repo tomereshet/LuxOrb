@@ -1,0 +1,1232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>LUXORB</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #111;
+            display: flex;
+            flex-direction: column;
+            touch-action: none;
+        }
+        /* ── Header bar ── */
+        #header {
+            flex-shrink: 0;
+            height: calc(46px + env(safe-area-inset-top));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: env(safe-area-inset-top) 14px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.09);
+            position: relative;
+        }
+        /* ── HUD (centered in header, horizontal) ── */
+        #hud {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 10px;
+            pointer-events: none;
+            user-select: none;
+        }
+        #level-label {
+            color: rgba(255,255,255,0.5);
+            font-family: system-ui, sans-serif;
+            font-size: 10px;
+            letter-spacing: 2.5px;
+        }
+        #progress-bar-track {
+            width: 80px;
+            height: 3px;
+            background: rgba(255,255,255,0.12);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        #progress-bar-fill {
+            height: 100%;
+            width: 0%;
+            background: rgba(255,255,255,0.65);
+            border-radius: 2px;
+            transition: width 0.35s ease;
+        }
+        #progress-count {
+            color: rgba(255,255,255,0.35);
+            font-family: system-ui, sans-serif;
+            font-size: 10px;
+        }
+        #points-label {
+            color: rgba(255,255,255,0.6);
+            font-family: system-ui, sans-serif;
+            font-size: 10px;
+            letter-spacing: 1px;
+            min-width: 44px;
+            text-align: right;
+        }
+        #best-label {
+            color: rgba(255,255,255,0.25);
+            font-family: system-ui, sans-serif;
+            font-size: 10px;
+            letter-spacing: 1px;
+            min-width: 44px;
+        }
+        /* ── Settings button (pinned to right of header) ── */
+        #settings-btn {
+            position: absolute;
+            right: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            border: 1.5px solid rgba(255,255,255,0.4);
+            background: transparent;
+            color: rgba(255,255,255,0.75);
+            font-size: 16px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+            transition: border-color 0.15s, color 0.15s;
+        }
+        #settings-btn:hover {
+            border-color: rgba(255,255,255,0.9);
+            color: rgba(255,255,255,1);
+        }
+        /* ── Settings dropdown ── */
+        #settings-panel {
+            position: fixed;
+            top: 54px;
+            right: 14px;
+            background: rgba(17,17,17,0.95);
+            border: 1px solid rgba(255,255,255,0.18);
+            border-radius: 10px;
+            padding: 14px 16px;
+            color: rgba(255,255,255,0.85);
+            font-family: system-ui, sans-serif;
+            font-size: 13px;
+            z-index: 100;
+            min-width: 210px;
+            display: none;
+        }
+        #settings-panel.open { display: block; }
+        .toggle-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 14px;
+        }
+        .toggle {
+            position: relative;
+            flex-shrink: 0;
+            width: 36px;
+            height: 20px;
+        }
+        .toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
+        .slider {
+            position: absolute;
+            inset: 0;
+            background: rgba(255,255,255,0.2);
+            border-radius: 20px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .slider::before {
+            content: '';
+            position: absolute;
+            width: 14px;
+            height: 14px;
+            left: 3px;
+            top: 3px;
+            background: white;
+            border-radius: 50%;
+            transition: transform 0.2s;
+        }
+        .toggle input:checked + .slider { background: rgba(86,180,233,0.7); }
+        .toggle input:checked + .slider::before { transform: translateX(16px); }
+        #reset-btn {
+            position: absolute;
+            left: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            border: 1.5px solid rgba(255,255,255,0.4);
+            background: transparent;
+            color: rgba(255,255,255,0.75);
+            font-size: 17px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+            transition: border-color 0.15s, color 0.15s;
+        }
+        #reset-btn:hover {
+            border-color: rgba(255,255,255,0.9);
+            color: rgba(255,255,255,1);
+        }
+        /* ── Game canvas ── */
+        #game-wrap {
+            flex: 1;
+            overflow: hidden;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        /* ── Tutorial overlay ── */
+        #tut-overlay {
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.78);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 200;
+            backdrop-filter: blur(3px);
+        }
+        #tut-overlay.hidden { display: none; }
+        #tut-card {
+            background: rgba(18,18,20,0.97);
+            border: 1px solid rgba(255,255,255,0.13);
+            border-radius: 18px;
+            padding: 22px 22px 18px;
+            max-width: 310px;
+            width: 92%;
+            display: flex; flex-direction: column; align-items: center;
+            gap: 13px;
+        }
+        #tut-title {
+            color: rgba(255,255,255,0.92);
+            font-family: system-ui, sans-serif;
+            font-size: 18px;
+            font-weight: 600;
+            text-align: center;
+            letter-spacing: 0.2px;
+        }
+        #tut-anim-canvas {
+            border-radius: 10px;
+            background: rgba(0,0,0,0.32);
+            display: block;
+            width: 260px;
+            height: 140px;
+        }
+        #tut-desc {
+            color: rgba(255,255,255,0.6);
+            font-family: system-ui, sans-serif;
+            font-size: 14px;
+            text-align: center;
+            line-height: 1.55;
+            max-width: 270px;
+        }
+        #tut-dots-row {
+            display: flex; gap: 7px; align-items: center;
+        }
+        .tut-dot {
+            width: 6px; height: 6px; border-radius: 50%;
+            background: rgba(255,255,255,0.22);
+            transition: background 0.2s;
+        }
+        .tut-dot.active { background: rgba(255,255,255,0.85); }
+        #tut-next-btn {
+            background: rgba(255,255,255,0.09);
+            border: 1px solid rgba(255,255,255,0.28);
+            color: rgba(255,255,255,0.88);
+            font-family: system-ui, sans-serif;
+            font-size: 14px;
+            font-weight: 500;
+            padding: 9px 30px;
+            border-radius: 22px;
+            cursor: pointer;
+            transition: background 0.15s, border-color 0.15s;
+            margin-top: 2px;
+        }
+        #tut-next-btn:hover {
+            background: rgba(255,255,255,0.18);
+            border-color: rgba(255,255,255,0.5);
+        }
+        .settings-sep { height:1px; background:rgba(255,255,255,0.08); margin:8px 0; }
+        .settings-action {
+            display:flex; align-items:center; justify-content:space-between;
+            gap:14px; cursor:pointer; opacity:0.72; transition:opacity 0.15s;
+        }
+        .settings-action:hover { opacity:1; }
+
+        /* ── Main menu ── */
+        #main-menu {
+            position: fixed; inset: 0;
+            display: flex; align-items: center; justify-content: center;
+            z-index: 150;
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(5px);
+            opacity: 1;
+            transition: opacity 0.35s ease;
+        }
+        #main-menu.fading { opacity: 0; pointer-events: none; }
+        #main-menu.hidden { display: none; }
+        /* ── Game Over overlay ── */
+        #gameover-overlay {
+            position: fixed; inset: 0;
+            display: flex; align-items: center; justify-content: center;
+            z-index: 160;
+            background: rgba(0,0,0,0.65);
+            backdrop-filter: blur(6px);
+            opacity: 1;
+            transition: opacity 0.4s ease;
+        }
+        #gameover-overlay.fading { opacity: 0; pointer-events: none; }
+        #gameover-overlay.hidden { display: none; }
+        #gameover-card {
+            background: rgba(14,14,16,0.97);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 22px;
+            padding: 36px 32px 28px;
+            width: 80%; max-width: 260px;
+            display: flex; flex-direction: column; align-items: center;
+            gap: 6px;
+        }
+        #gameover-title {
+            font-family: system-ui, sans-serif;
+            font-size: 13px;
+            font-weight: 400;
+            letter-spacing: 4px;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.4);
+            margin-bottom: 8px;
+        }
+        #gameover-score-label {
+            font-family: system-ui, sans-serif;
+            font-size: 11px;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.3);
+        }
+        #gameover-score {
+            font-family: system-ui, sans-serif;
+            font-size: 56px;
+            font-weight: 100;
+            color: rgba(255,255,255,0.92);
+            line-height: 1;
+            margin: 4px 0 8px;
+        }
+        #gameover-best {
+            font-family: system-ui, sans-serif;
+            font-size: 11px;
+            letter-spacing: 2px;
+            color: rgba(255,255,255,0.28);
+            min-height: 16px;
+            margin-bottom: 14px;
+        }
+        #menu-card {
+            background: rgba(14,14,16,0.97);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 22px;
+            padding: 36px 28px 28px;
+            width: 88%; max-width: 290px;
+            display: flex; flex-direction: column; align-items: center;
+            gap: 10px;
+        }
+        #menu-title {
+            font-family: system-ui, sans-serif;
+            font-size: 38px; font-weight: 200;
+            color: rgba(255,255,255,0.93);
+            letter-spacing: 6px;
+            text-shadow: 0 0 28px rgba(255,255,255,0.25);
+            margin-bottom: 2px;
+            display: flex;
+            align-items: center;
+        }
+        #logo-canvas {
+            display: block;
+            flex-shrink: 0;
+            width: 40px;
+            height: 46px;
+            margin-left: -4px;
+            margin-right: 1px;
+        }
+        #menu-subtitle {
+            font-family: system-ui, sans-serif;
+            font-size: 11px; letter-spacing: 3px;
+            color: rgba(255,255,255,0.28);
+            text-transform: uppercase;
+            margin-bottom: 10px;
+        }
+        .menu-btn {
+            width: 100%; padding: 12px 0;
+            border-radius: 14px;
+            font-family: system-ui, sans-serif;
+            font-size: 15px; font-weight: 500;
+            cursor: pointer;
+            border: 1px solid rgba(255,255,255,0.2);
+            background: rgba(255,255,255,0.06);
+            color: rgba(255,255,255,0.82);
+            transition: background 0.15s, border-color 0.15s, color 0.15s;
+            text-align: center; text-decoration: none;
+            display: block;
+        }
+        .menu-btn:hover {
+            background: rgba(255,255,255,0.14);
+            border-color: rgba(255,255,255,0.42);
+            color: #fff;
+        }
+        .menu-btn.primary {
+            font-size: 17px; font-weight: 600;
+            padding: 14px 0; letter-spacing: 0.5px;
+            background: rgba(255,255,255,0.12);
+            border-color: rgba(255,255,255,0.38);
+        }
+        .menu-btn.primary:hover {
+            background: rgba(255,255,255,0.22);
+            border-color: rgba(255,255,255,0.65);
+        }
+        .menu-btn.ghost {
+            background: transparent; border-color: transparent;
+            color: rgba(255,255,255,0.38); font-size: 13px;
+        }
+        .menu-btn.ghost:hover {
+            background: transparent; border-color: transparent;
+            color: rgba(255,255,255,0.65);
+        }
+        /* Settings sub-view inside menu card */
+        #menu-main-view, #menu-settings-view {
+            display: flex; flex-direction: column; align-items: center;
+            gap: 10px; width: 100%;
+        }
+        #menu-settings-view { display: none; }
+        #menu-settings-view.visible { display: flex; }
+        #menu-main-view.gone { display: none; }
+        #menu-settings-heading {
+            font-family: system-ui, sans-serif;
+            font-size: 15px; font-weight: 600;
+            color: rgba(255,255,255,0.75);
+            text-align: center; margin-bottom: 4px;
+        }
+        .menu-toggle-row {
+            width: 100%;
+            display: flex; align-items: center;
+            justify-content: space-between; gap: 14px;
+            font-family: system-ui, sans-serif;
+            font-size: 13px; color: rgba(255,255,255,0.72);
+        }
+    </style>
+</head>
+<body>
+    <div id="header">
+        <button id="reset-btn" title="Reset">&#8635;</button>
+        <div id="hud">
+            <span id="level-label">LEVEL 1</span>
+            <div id="progress-bar-track">
+                <div id="progress-bar-fill"></div>
+            </div>
+            <span id="points-label">0 pts</span>
+            <span id="best-label">BEST 0</span>
+        </div>
+        <button id="settings-btn" title="Settings">&#9881;</button>
+    </div>
+
+    <div id="settings-panel">
+        <div class="toggle-row">
+            <span>Colorblind-friendly colors</span>
+            <label class="toggle">
+                <input type="checkbox" id="cb-toggle">
+                <span class="slider"></span>
+            </label>
+        </div>
+        <div class="settings-sep"></div>
+        <div class="settings-action" id="reset-tut-btn">
+            <span>Reset tutorials</span>
+            <span style="font-size:15px">↺</span>
+        </div>
+    </div>
+
+    <!-- Main menu -->
+    <div id="main-menu">
+        <div id="menu-card">
+            <!-- Main view -->
+            <div id="menu-main-view">
+                <div id="menu-title"><span>LUX</span><canvas id="logo-canvas"></canvas><span>RB</span></div>
+                <div id="menu-subtitle">Particle Sandbox</div>
+                <button class="menu-btn primary" id="menu-play-btn">&#9654;&ensp;Play</button>
+                <button class="menu-btn" id="menu-howto-btn">How to Play</button>
+                <button class="menu-btn" id="menu-settings-nav-btn">Settings</button>
+                <a class="menu-btn ghost" id="menu-more-btn" href="#" onclick="return false;">More Games by Author &nearr;</a>
+            </div>
+            <!-- Settings sub-view -->
+            <div id="menu-settings-view">
+                <div id="menu-settings-heading">Settings</div>
+                <div class="menu-toggle-row">
+                    <span>Colorblind-friendly colors</span>
+                    <label class="toggle">
+                        <input type="checkbox" id="menu-cb-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="settings-sep" style="width:100%"></div>
+                <div class="settings-action" style="width:100%" id="menu-reset-tut-btn">
+                    <span>Reset tutorials</span>
+                    <span style="font-size:15px">&#8635;</span>
+                </div>
+                <button class="menu-btn" id="menu-back-btn" style="margin-top:6px">&#8592;&ensp;Back</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Game Over overlay -->
+    <div id="gameover-overlay" class="hidden">
+        <div id="gameover-card">
+            <div id="gameover-title">Game Over</div>
+            <div id="gameover-score-label">Score</div>
+            <div id="gameover-score">0</div>
+            <div id="gameover-best"></div>
+            <button class="menu-btn primary" id="gameover-play-btn">&#9654;&ensp;Play Again</button>
+            <button class="menu-btn" id="gameover-menu-btn">Main Menu</button>
+        </div>
+    </div>
+
+    <!-- Tutorial overlay -->
+    <div id="tut-overlay" class="hidden">
+        <div id="tut-card">
+            <div id="tut-title"></div>
+            <canvas id="tut-anim-canvas" width="260" height="140"></canvas>
+            <div id="tut-desc"></div>
+            <div id="tut-dots-row"></div>
+            <button id="tut-next-btn">Next</button>
+        </div>
+    </div>
+
+    <div id="game-wrap">
+        <canvas id="game"></canvas>
+    </div>
+
+    <script src="game.js"></script>
+    <script>
+        const settingsBtn = document.getElementById('settings-btn');
+        const settingsPanel = document.getElementById('settings-panel');
+        settingsBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            settingsPanel.classList.toggle('open');
+        });
+        document.addEventListener('click', (e) => {
+            if (!settingsPanel.contains(e.target) && e.target !== settingsBtn) {
+                settingsPanel.classList.remove('open');
+            }
+        });
+        document.getElementById('cb-toggle').addEventListener('change', (e) => {
+            switchPalette(e.target.checked ? 'colorblind' : 'normal');
+        });
+        document.getElementById('reset-btn').addEventListener('click', () => init());
+        document.getElementById('reset-tut-btn').addEventListener('click', () => {
+            resetTutorials();
+            settingsPanel.classList.remove('open');
+            showIntroTutorial(true);
+        });
+    </script>
+
+    <script>
+    /* ── Tutorial engine ── */
+    (function() {
+        const TAU = Math.PI * 2;
+        const COLORS = ['#ff4455','#44aaff','#ffdd33','#44ee88','#ff8800','#cc44ff'];
+        const CYCLE = 4000; // ms per animation loop
+
+        /* Canvas / DPR setup */
+        const overlay = document.getElementById('tut-overlay');
+        const titleEl = document.getElementById('tut-title');
+        const descEl  = document.getElementById('tut-desc');
+        const dotsEl  = document.getElementById('tut-dots-row');
+        const nextBtn = document.getElementById('tut-next-btn');
+        const ac      = document.getElementById('tut-anim-canvas');
+        const tc      = ac.getContext('2d');
+        const dpr = window.devicePixelRatio || 1;
+        const TC_W = 260, TC_H = 140;
+        ac.width  = TC_W * dpr;
+        ac.height = TC_H * dpr;
+        tc.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        /* ── Drawing helpers (tc in closure) ── */
+        function drawBHSpiral(cx, cy, R, sa) {
+            tc.save();
+            for (let arm = 0; arm < 2; arm++) {
+                const base = sa + (arm / 2) * TAU;
+                tc.strokeStyle = 'rgba(160,160,160,0.42)'; tc.lineWidth = 1.5;
+                tc.beginPath();
+                for (let i = 0; i <= 40; i++) {
+                    const tt = i / 40, r = R * 0.25 + tt * R * 2, a = base + tt * Math.PI * 2.5;
+                    i === 0 ? tc.moveTo(cx + Math.cos(a)*r, cy + Math.sin(a)*r)
+                            : tc.lineTo(cx + Math.cos(a)*r, cy + Math.sin(a)*r);
+                }
+                tc.stroke();
+            }
+            tc.restore();
+        }
+        function drawBH(cx, cy, R, sa) {
+            tc.save();
+            tc.shadowBlur = 24; tc.shadowColor = 'rgba(140,140,140,0.55)';
+            tc.fillStyle = '#030303'; tc.strokeStyle = 'rgba(160,160,160,0.7)'; tc.lineWidth = 1.5;
+            tc.beginPath(); tc.arc(cx, cy, R, 0, TAU); tc.fill(); tc.stroke();
+            tc.restore();
+            drawBHSpiral(cx, cy, R, sa);
+        }
+        function drawOrb(x, y, R) {
+            tc.save();
+            tc.shadowBlur = 16; tc.shadowColor = 'rgba(255,255,255,0.5)';
+            tc.fillStyle = '#111'; tc.strokeStyle = 'rgba(255,255,255,0.85)'; tc.lineWidth = 1.5;
+            tc.beginPath(); tc.arc(x, y, R, 0, TAU); tc.fill(); tc.stroke();
+            tc.restore();
+        }
+        function drawDot(x, y, r, color) {
+            tc.save();
+            tc.shadowBlur = 9; tc.shadowColor = color; tc.fillStyle = color;
+            tc.beginPath(); tc.arc(x, y, r, 0, TAU); tc.fill();
+            tc.restore();
+        }
+
+        /* ── Intro pages ── */
+        const INTRO = [
+            {
+                title: 'Drag to fire an orb',
+                desc: 'Press and drag on any orb, then release to launch it in that direction.',
+                draw(t) {
+                    const cx = TC_W/2, cy = TC_H/2, OR = 20;
+                    const ang = Math.PI * 0.28; // drag direction (~50° below-right)
+                    if (t < 0.35) {
+                        // Phase 1: orb + orbiting particle + drag arrow building up
+                        const len = (t / 0.35) * 52;
+                        drawOrb(cx, cy, OR);
+                        const pa = t * TAU * 0.65;
+                        drawDot(cx+Math.cos(pa)*OR*1.5, cy+Math.sin(pa)*OR*1.5, 4, COLORS[0]);
+                        if (len > 5) {
+                            const tx2 = cx+Math.cos(ang)*len, ty2 = cy+Math.sin(ang)*len;
+                            tc.save();
+                            tc.strokeStyle = 'rgba(255,255,255,0.48)'; tc.lineWidth = 1.5;
+                            tc.setLineDash([5,4]);
+                            tc.beginPath(); tc.moveTo(cx, cy); tc.lineTo(tx2, ty2); tc.stroke();
+                            tc.setLineDash([]);
+                            const hl = 10, sp = Math.PI/6;
+                            tc.fillStyle = 'rgba(255,255,255,0.72)';
+                            tc.beginPath();
+                            tc.moveTo(tx2, ty2);
+                            tc.lineTo(tx2 - hl*Math.cos(ang-sp), ty2 - hl*Math.sin(ang-sp));
+                            tc.lineTo(tx2 - hl*Math.cos(ang+sp), ty2 - hl*Math.sin(ang+sp));
+                            tc.closePath(); tc.fill();
+                            tc.restore();
+                        }
+                    } else {
+                        // Phase 2: orb disappears instantly, particle flies as free particle
+                        const et = (t - 0.35) / 0.65;
+                        // Brief flash at orb origin
+                        if (et < 0.1) {
+                            tc.save(); tc.globalAlpha = (1 - et/0.1) * 0.6;
+                            tc.fillStyle = 'rgba(255,255,255,0.85)';
+                            tc.beginPath(); tc.arc(cx, cy, OR*(1 + et*2), 0, TAU); tc.fill();
+                            tc.restore();
+                        }
+                        // Particle was at this orbital position when the orb fired
+                        const launchA = 0.35 * TAU * 0.65;
+                        const startX = cx + Math.cos(launchA)*OR*1.5;
+                        const startY = cy + Math.sin(launchA)*OR*1.5;
+                        // Fly in the same direction as the drag arrow
+                        const flyDir = ang;
+                        const ease = 1 - Math.exp(-et * 3.5);
+                        const px2 = startX + Math.cos(flyDir) * 82 * ease;
+                        const py2 = startY + Math.sin(flyDir) * 82 * ease;
+                        const alpha = Math.max(0, 1 - Math.max(0, (et - 0.62)/0.38));
+                        tc.save(); tc.globalAlpha = alpha;
+                        drawDot(px2, py2, 4, COLORS[0]);
+                        tc.restore();
+                    }
+                }
+            },
+            {
+                title: 'Particles orbit other orbs',
+                desc: 'Loose particles drift and are captured by nearby orbs, joining their orbit.',
+                draw(t) {
+                    const ox = TC_W*0.60, oy = TC_H/2, OR = 20;
+                    drawOrb(ox, oy, OR);
+                    // Free particle drifts in from upper-left, then orbits
+                    if (t < 0.50) {
+                        const startX = TC_W*0.06, startY = TC_H*0.18;
+                        const endX = ox - OR*1.5, endY = oy;
+                        const frac = t / 0.50;
+                        drawDot(startX + frac*(endX-startX), startY + frac*(endY-startY), 4, COLORS[2]);
+                    } else {
+                        // Orbit starts from left side (angle = Math.PI) for smooth entry
+                        const orbitT = (t - 0.50) / 0.50;
+                        const a = Math.PI - orbitT*TAU*0.65;
+                        drawDot(ox+Math.cos(a)*OR*1.5, oy+Math.sin(a)*OR*1.5, 4, COLORS[2]);
+                    }
+                }
+            },
+            {
+                title: 'Fill the recipe',
+                desc: 'Each orb needs 3 specific colors. Collect them all to unlock its special effect!',
+                draw(t) {
+                    const cx = TC_W/2, cy = TC_H/2, OR = 18;
+                    const recipe = [COLORS[0], COLORS[1], COLORS[2]];
+                    drawOrb(cx, cy, OR);
+                    for (let i = 0; i < 3; i++) {
+                        const a = t*TAU*0.65 + (i/3)*TAU;
+                        drawDot(cx+Math.cos(a)*OR*1.5, cy+Math.sin(a)*OR*1.5, 4, recipe[i]);
+                    }
+                    const dotY = cy + 6, nFilled = Math.min(3, Math.floor(t * 3.8));
+                    for (let i = 0; i < 3; i++) {
+                        const dotX = cx + (i-1)*9;
+                        tc.save();
+                        tc.fillStyle = recipe[i]; tc.shadowBlur = 5; tc.shadowColor = recipe[i];
+                        tc.beginPath(); tc.arc(dotX, dotY, 3, 0, TAU); tc.fill();
+                        if (i < nFilled) {
+                            tc.strokeStyle = 'rgba(255,255,255,0.85)'; tc.lineWidth = 1; tc.shadowBlur = 0;
+                            tc.beginPath(); tc.arc(dotX, dotY, 4.5, 0, TAU); tc.stroke();
+                        }
+                        tc.restore();
+                    }
+                    if (t > 0.86) {
+                        tc.save(); tc.globalAlpha = Math.sin(((t-0.86)/0.14)*Math.PI)*0.42;
+                        tc.fillStyle = 'rgba(255,255,255,0.8)';
+                        tc.beginPath(); tc.arc(cx, cy, OR*2.5, 0, TAU); tc.fill();
+                        tc.restore();
+                    }
+                }
+            },
+            {
+                title: 'spawn3 — Three New Orbs',
+                desc: 'When fired, this orb disappears and 3 fresh orbs spawn in its place.',
+                draw(t) {
+                    const cx = TC_W/2, cy = TC_H/2;
+                    if (t < 0.38) {
+                        drawOrb(cx, cy, 18);
+                        // spawn3 icon (3 mini orbs in triangle with dots)
+                        tc.save();
+                        tc.strokeStyle = 'rgba(255,255,255,0.7)'; tc.fillStyle = 'rgba(255,255,255,0.85)'; tc.lineWidth = 1;
+                        const ix = cx, iy = cy - 7;
+                        for (const [bx, by] of [[ix, iy-5],[ix-7, iy+3],[ix+7, iy+3]]) {
+                            tc.beginPath(); tc.arc(bx, by, 3.5, 0, TAU); tc.stroke();
+                            tc.beginPath(); tc.arc(bx+3.2, by-3.2, 1.5, 0, TAU); tc.fill();
+                        }
+                        tc.restore();
+                        for (let i = 0; i < 3; i++) {
+                            const a = t*TAU*0.65 + (i/3)*TAU;
+                            drawDot(cx+Math.cos(a)*27, cy+Math.sin(a)*27, 4, COLORS[i]);
+                        }
+                    } else {
+                        const et = (t - 0.38) / 0.62;
+                        if (et < 0.2) {
+                            tc.save(); tc.globalAlpha = (1-et/0.2)*0.5;
+                            tc.fillStyle = 'rgba(255,255,255,0.8)';
+                            tc.beginPath(); tc.arc(cx, cy, 38, 0, TAU); tc.fill();
+                            tc.restore();
+                        }
+                        // 3 orbs just appear at fixed positions (no movement from center)
+                        for (let i = 0; i < 3; i++) {
+                            const sa = (i/3)*TAU - Math.PI/2;
+                            const nx = cx + Math.cos(sa)*44, ny = cy + Math.sin(sa)*44;
+                            tc.save(); tc.globalAlpha = Math.min(1, et * 5);
+                            drawOrb(nx, ny, 14);
+                            tc.restore();
+                        }
+                    }
+                }
+            },
+            {
+                title: 'rocket — Particle Launch',
+                desc: 'When fired, all particles of a random orb are instantly launched as free particles.',
+                draw(t) {
+                    const rox = TC_W*0.30, oy = TC_H/2, OR = 16;
+                    const vox = TC_W*0.70;
+                    if (t < 0.38) {
+                        // Left: rocket orb with icon
+                        drawOrb(rox, oy, OR);
+                        tc.save();
+                        tc.strokeStyle = 'rgba(255,255,255,0.7)'; tc.fillStyle = 'rgba(255,255,255,0.85)'; tc.lineWidth = 1;
+                        tc.translate(rox, oy - 7);
+                        tc.beginPath(); tc.moveTo(0,-9); tc.lineTo(-3,-4); tc.lineTo(3,-4); tc.closePath(); tc.fill();
+                        tc.fillRect(-2.5,-4,5,8);
+                        tc.beginPath(); tc.moveTo(-2.5,2); tc.lineTo(-5.5,6); tc.lineTo(-2.5,5); tc.closePath(); tc.fill();
+                        tc.beginPath(); tc.moveTo(2.5,2); tc.lineTo(5.5,6); tc.lineTo(2.5,5); tc.closePath(); tc.fill();
+                        tc.fillStyle = 'rgba(17,17,17,0.7)';
+                        tc.beginPath(); tc.arc(0,-1,1.5,0,TAU); tc.fill();
+                        tc.restore();
+                        // Right: victim orb with 3 particles
+                        drawOrb(vox, oy, OR);
+                        for (let i = 0; i < 3; i++) {
+                            const a = t*TAU*0.65 + (i/3)*TAU;
+                            drawDot(vox+Math.cos(a)*OR*1.5, oy+Math.sin(a)*OR*1.5, 4, COLORS[i]);
+                        }
+                    } else {
+                        const et = (t - 0.38) / 0.62;
+                        // Rocket orb disappears instantly — brief flash only
+                        if (et < 0.15) {
+                            tc.save(); tc.globalAlpha = (1-et/0.15)*0.55;
+                            tc.fillStyle = 'rgba(255,120,50,0.8)';
+                            tc.beginPath(); tc.arc(rox, oy, 30, 0, TAU); tc.fill();
+                            tc.restore();
+                        }
+                        // Victim orb stays, its particles fly from their orbit positions
+                        drawOrb(vox, oy, OR);
+                        for (let i = 0; i < 3; i++) {
+                            const startAngle = 0.38*TAU*0.65 + (i/3)*TAU;
+                            const sx = vox + Math.cos(startAngle)*OR*1.5;
+                            const sy = oy  + Math.sin(startAngle)*OR*1.5;
+                            const dist = et * 52;
+                            tc.save(); tc.globalAlpha = Math.max(0, 1 - et*0.8);
+                            drawDot(sx + Math.cos(startAngle)*dist, sy + Math.sin(startAngle)*dist, 4, COLORS[i]);
+                            tc.restore();
+                        }
+                    }
+                }
+            },
+            {
+                title: 'blip — Particle Blink',
+                desc: 'Each time another orb is fired, a particle from a random orb blips out of existence. The blip cannot launch until its recipe is full.',
+                draw(t) {
+                    const bx = TC_W*0.30, by = TC_H/2, OR = 16;
+                    const vx = TC_W*0.72, vy = TC_H/2, vOR = 13*1.5;
+                    const blinkT = 0.5;
+                    // Blip orb: red pulse when blink happens
+                    const bpulse = Math.max(0, 1 - Math.abs(t - blinkT) * 10);
+                    if (bpulse > 0.05) {
+                        tc.save();
+                        tc.shadowBlur = 20*bpulse; tc.shadowColor = 'rgba(255,40,40,0.9)';
+                        tc.strokeStyle = `rgba(255,55,55,${bpulse*0.85})`; tc.lineWidth = 2;
+                        tc.beginPath(); tc.arc(bx, by, OR*(1+(1-bpulse)*0.4), 0, TAU); tc.stroke();
+                        tc.restore();
+                    }
+                    drawOrb(bx, by, OR);
+                    // Blip icon
+                    tc.save();
+                    tc.strokeStyle = 'rgba(255,255,255,0.7)'; tc.fillStyle = 'rgba(255,255,255,0.85)'; tc.lineWidth = 1;
+                    tc.setLineDash([2,3]);
+                    tc.beginPath(); tc.arc(bx, by-7, 7, 0, TAU); tc.stroke();
+                    tc.setLineDash([]);
+                    for (let bi = 0; bi < 5; bi++) {
+                        const a = (bi/5)*TAU;
+                        tc.beginPath(); tc.arc(bx+Math.cos(a)*3, (by-7)+Math.sin(a)*3, 1.3, 0, TAU); tc.fill();
+                    }
+                    tc.restore();
+                    for (let i = 0; i < 2; i++) {
+                        const a = t*TAU*0.65 + (i/2)*TAU;
+                        drawDot(bx+Math.cos(a)*OR*1.5, by+Math.sin(a)*OR*1.5, 3.5, COLORS[i]);
+                    }
+                    // Victim orb
+                    drawOrb(vx, vy, 13);
+                    // 2 steady particles + 1 that blips out at blinkT
+                    for (let i = 0; i < 2; i++) {
+                        const a = t*TAU*0.65 + (i/2)*TAU;
+                        drawDot(vx+Math.cos(a)*vOR, vy+Math.sin(a)*vOR, 3.5, COLORS[3+i]);
+                    }
+                    if (t < blinkT) {
+                        const a = t*TAU*0.65 + TAU*0.67;
+                        drawDot(vx+Math.cos(a)*vOR, vy+Math.sin(a)*vOR, 3.5, COLORS[5]);
+                    }
+                    // Particle blips out at its own position — debris then gone
+                    if (t > blinkT && t < blinkT + 0.22) {
+                        const ft = (t - blinkT) / 0.22;
+                        const lastA = blinkT*TAU*0.65 + TAU*0.67;
+                        const sx = vx+Math.cos(lastA)*vOR, sy = vy+Math.sin(lastA)*vOR;
+                        for (let j = 0; j < 5; j++) {
+                            const da = (j/5)*TAU;
+                            tc.save(); tc.globalAlpha = 1 - ft;
+                            drawDot(sx+Math.cos(da)*ft*16, sy+Math.sin(da)*ft*16, 2.5, COLORS[5]);
+                            tc.restore();
+                        }
+                    }
+                }
+            },
+            {
+                title: 'fireworks — Particle Shower',
+                desc: 'When fired, this orb bursts and showers the arena with bonus free particles.',
+                draw(t) {
+                    const cx = TC_W*0.35, cy = TC_H/2;
+                    const px = TC_W*0.72, py = TC_H*0.30; // particles appear elsewhere
+                    if (t < 0.32) {
+                        drawOrb(cx, cy, 18);
+                        // Fireworks icon
+                        tc.save();
+                        tc.strokeStyle = 'rgba(255,255,255,0.7)'; tc.fillStyle = 'rgba(255,255,255,0.85)'; tc.lineWidth = 1;
+                        tc.translate(cx, cy - 7);
+                        for (let i = 0; i < 6; i++) {
+                            const a = (i/6)*TAU;
+                            tc.beginPath(); tc.moveTo(Math.cos(a)*2, Math.sin(a)*2); tc.lineTo(Math.cos(a)*8, Math.sin(a)*8); tc.stroke();
+                            tc.beginPath(); tc.arc(Math.cos(a)*8, Math.sin(a)*8, 1.3, 0, TAU); tc.fill();
+                        }
+                        tc.restore();
+                        for (let i = 0; i < 4; i++) {
+                            const a = t*TAU*0.65 + (i/4)*TAU;
+                            drawDot(cx+Math.cos(a)*27, cy+Math.sin(a)*27, 4, COLORS[i]);
+                        }
+                    } else {
+                        const et = (t - 0.32) / 0.68;
+                        if (et < 0.22) {
+                            tc.save(); tc.globalAlpha = (1-et/0.22)*0.5;
+                            tc.fillStyle = 'rgba(255,200,80,0.7)';
+                            tc.beginPath(); tc.arc(cx, cy, 36, 0, TAU); tc.fill();
+                            tc.restore();
+                        }
+                        // 5 particles appear at different location, keep drifting, fade before loop
+                        if (et > 0.12) {
+                            const pt = (et - 0.12) / 0.88; // 0→1
+                            for (let i = 0; i < 5; i++) {
+                                const a = (i/5)*TAU;
+                                const drift = pt * 38;
+                                const alpha = Math.min(1, pt*5) * Math.max(0, 1 - (pt - 0.6)/0.4);
+                                if (alpha <= 0) continue;
+                                tc.save(); tc.globalAlpha = alpha;
+                                drawDot(px + Math.cos(a)*drift, py + Math.sin(a)*drift, 4, COLORS[i]);
+                                tc.restore();
+                            }
+                        }
+                    }
+                }
+            },
+            {
+                title: '10 particles → orb splits',
+                desc: 'When an orb collects 10 or more particles, it automatically splits into two new orbs.',
+                draw(t) {
+                    const cx = TC_W/2, cy = TC_H/2, OR = 18;
+                    if (t < 0.55) {
+                        // Orb growing in particle count
+                        drawOrb(cx, cy, OR);
+                        const nDots = Math.max(1, Math.ceil(t / 0.55 * 10));
+                        for (let i = 0; i < nDots; i++) {
+                            const a = t*TAU*0.5 + (i/nDots)*TAU;
+                            drawDot(cx+Math.cos(a)*OR*1.5, cy+Math.sin(a)*OR*1.5, 4, COLORS[i%6]);
+                        }
+                        tc.save();
+                        tc.globalAlpha = 0.55 + (nDots/10)*0.35;
+                        tc.fillStyle = 'white';
+                        tc.font = `${10 + nDots*0.7}px system-ui`;
+                        tc.textAlign = 'center'; tc.textBaseline = 'middle';
+                        tc.fillText(nDots, cx, cy);
+                        tc.restore();
+                    } else {
+                        // Two orbs drift apart
+                        const et = (t - 0.55) / 0.45;
+                        const ease = 1 - Math.exp(-et * 5);
+                        const sep = ease * 40;
+                        const lx = cx - sep, rx = cx + sep;
+                        drawOrb(lx, cy, OR * 0.85);
+                        drawOrb(rx, cy, OR * 0.85);
+                        for (let i = 0; i < 5; i++) {
+                            const a = t*TAU*0.5 + (i/5)*TAU;
+                            const al = Math.min(1, et * 4);
+                            tc.save(); tc.globalAlpha = al;
+                            drawDot(lx+Math.cos(a)*OR*1.3, cy+Math.sin(a)*OR*1.3, 3.5, COLORS[i]);
+                            drawDot(rx+Math.cos(a+Math.PI)*OR*1.3, cy+Math.sin(a+Math.PI)*OR*1.3, 3.5, COLORS[(i+3)%6]);
+                            tc.restore();
+                        }
+                    }
+                }
+            },
+            {
+                title: '6 colors → Overload',
+                desc: 'An orb holding all 6 colors at once overloads — one particle of each color blips out of existence.',
+                draw(t) {
+                    const cx = TC_W/2, cy = TC_H/2, OR = 18;
+                    const blinkT = 0.52;
+                    // Pulse ring at blink moment (like blip animation)
+                    const bpulse = Math.max(0, 1 - Math.abs(t - blinkT) * 14);
+                    if (bpulse > 0.05) {
+                        tc.save();
+                        tc.shadowBlur = 20*bpulse; tc.shadowColor = 'rgba(255,80,40,0.9)';
+                        tc.strokeStyle = `rgba(255,80,40,${(bpulse*0.85).toFixed(2)})`; tc.lineWidth = 2;
+                        tc.beginPath(); tc.arc(cx, cy, OR*(1+(1-bpulse)*0.6), 0, TAU); tc.stroke();
+                        tc.restore();
+                    }
+                    drawOrb(cx, cy, OR);
+                    if (t < blinkT) {
+                        // All 6 particles orbiting
+                        for (let i = 0; i < 6; i++) {
+                            const a = t*TAU*0.5 + (i/6)*TAU;
+                            drawDot(cx+Math.cos(a)*OR*1.5, cy+Math.sin(a)*OR*1.5, 4, COLORS[i]);
+                        }
+                    } else {
+                        // All 6 blip out simultaneously — debris at their orbit positions
+                        const ft = Math.min(1, (t - blinkT) / 0.32);
+                        for (let i = 0; i < 6; i++) {
+                            const lastA = blinkT*TAU*0.5 + (i/6)*TAU;
+                            const sx = cx + Math.cos(lastA)*OR*1.5;
+                            const sy = cy + Math.sin(lastA)*OR*1.5;
+                            for (let j = 0; j < 5; j++) {
+                                const da = (j/5)*TAU;
+                                tc.save(); tc.globalAlpha = Math.max(0, 1 - ft);
+                                drawDot(sx+Math.cos(da)*ft*14, sy+Math.sin(da)*ft*14, 2.5, COLORS[i]);
+                                tc.restore();
+                            }
+                        }
+                    }
+                }
+            }
+        ];
+
+        /* ── Black hole pages ── */
+        const BH_PAGES = [
+            {
+                title: 'A Black Hole appeared!',
+                desc: 'From level 3 onward, black holes can appear after an orb is destroyed. They repel orbs but attract loose particles.',
+                draw(t) {
+                    const cx = TC_W/2, cy = TC_H/2, R = 20, sa = t*TAU*2;
+                    drawBH(cx, cy, R, sa);
+                    const pr = 62 - t*57, pa = t*TAU*2.5;
+                    drawDot(cx+Math.cos(pa)*pr, cy+Math.sin(pa)*pr, 4, COLORS[2]);
+                    drawOrb(TC_W*0.82, TC_H*0.28, 13);
+                }
+            },
+            {
+                title: 'Feed it all 6 colors',
+                desc: 'The black hole captures free particles. Deliver one of each of the 6 colors to activate it.',
+                draw(t) {
+                    const cx = TC_W/2, cy = TC_H/2, R = 18, sa = t*TAU;
+                    drawBH(cx, cy, R, sa);
+                    const nCap = Math.floor(t * 7);
+                    for (let i = 0; i < Math.min(nCap, 6); i++) {
+                        const a = sa*2 + (i/6)*TAU;
+                        drawDot(cx+Math.cos(a)*R*1.55, cy+Math.sin(a)*R*1.55, 4, COLORS[i]);
+                    }
+                    if (nCap < 6) {
+                        const prog = t*7 - nCap;
+                        const fromA = (nCap/6)*TAU*2 + Math.PI*0.7;
+                        drawDot(cx+Math.cos(fromA)*(70-prog*70), cy+Math.sin(fromA)*(70-prog*70), 4, COLORS[nCap]);
+                    }
+                }
+            },
+            {
+                title: 'It claims the nearest orb',
+                desc: 'Once all 6 colors are collected, the black hole pulls in the nearest orb, triggers its effect, then disappears.',
+                draw(t) {
+                    const bx = TC_W*0.36, by = TC_H/2, sa = t*TAU, pullT = Math.min(t*1.4, 1);
+                    const ox = TC_W*0.75, curOx = ox - pullT*(ox - bx);
+                    drawBH(bx, by, 18, sa);
+                    for (let i = 0; i < 6; i++) {
+                        const a = sa*2 + (i/6)*TAU;
+                        drawDot(bx+Math.cos(a)*18*1.5, by+Math.sin(a)*18*1.5, 3.5, COLORS[i]);
+                    }
+                    if (pullT < 0.92) {
+                        const scale = 1 - pullT*0.55;
+                        tc.save(); tc.globalAlpha = 1 - pullT*0.7;
+                        drawOrb(curOx, by, 14*scale);
+                        tc.restore();
+                    } else {
+                        const ft = (pullT-0.92)/0.08;
+                        tc.save(); tc.globalAlpha = Math.sin(ft*Math.PI)*0.65;
+                        tc.fillStyle = 'rgba(255,255,255,0.9)';
+                        tc.beginPath(); tc.arc(bx, by, 18*3, 0, TAU); tc.fill();
+                        tc.restore();
+                    }
+                }
+            }
+        ];
+
+        /* ── Engine ── */
+        let curTutorial = null, curPage = 0, pages = [], animHandle = null, pageStart = null;
+
+        function showPage(idx) {
+            curPage = idx;
+            const pg = pages[idx];
+            titleEl.textContent = pg.title;
+            descEl.textContent  = pg.desc;
+            dotsEl.innerHTML = '';
+            pages.forEach((_, i) => {
+                const d = document.createElement('div');
+                d.className = 'tut-dot' + (i === idx ? ' active' : '');
+                dotsEl.appendChild(d);
+            });
+            nextBtn.textContent = idx === pages.length - 1 ? 'Got it!' : 'Next';
+            pageStart = null;
+        }
+
+        function animLoop(ts) {
+            if (!pageStart) pageStart = ts;
+            const t = ((ts - pageStart) % CYCLE) / CYCLE;
+            tc.clearRect(0, 0, TC_W, TC_H);
+            pages[curPage].draw(t);
+            animHandle = requestAnimationFrame(animLoop);
+        }
+
+        function openTutorial(pgs) {
+            pages = pgs;
+            overlay.classList.remove('hidden');
+            showPage(0);
+            if (animHandle) cancelAnimationFrame(animHandle);
+            animHandle = requestAnimationFrame(animLoop);
+        }
+
+        function closeTutorial() {
+            overlay.classList.add('hidden');
+            if (animHandle) { cancelAnimationFrame(animHandle); animHandle = null; }
+            curTutorial = null;
+            window.onTutorialClosed?.();
+            window.onTutorialClosed = null;
+        }
+
+        nextBtn.addEventListener('click', () => {
+            if (curPage < pages.length - 1) {
+                showPage(curPage + 1);
+            } else {
+                if (curTutorial === 'intro') localStorage.setItem('tut_intro_done', '1');
+                if (curTutorial === 'bh')    localStorage.setItem('tut_bh_done',    '1');
+                closeTutorial();
+            }
+        });
+
+        window.showIntroTutorial = function(force) {
+            if (!force && localStorage.getItem('tut_intro_done')) return;
+            curTutorial = 'intro';
+            openTutorial(INTRO);
+        };
+        window.showBHTutorial = function(force) {
+            if (!force && localStorage.getItem('tut_bh_done')) return;
+            curTutorial = 'bh';
+            openTutorial(BH_PAGES);
+        };
+        window.resetTutorials = function() {
+            localStorage.removeItem('tut_intro_done');
+            localStorage.removeItem('tut_bh_done');
+        };
+        window.onBlackHoleSpawned = function() {
+            showBHTutorial(false);
+        };
+        window.onGameOver = function() {
+            const overlay = document.getElementById('gameover-overlay');
+            document.getElementById('gameover-score').textContent = points;
+            const best = parseInt(localStorage.getItem('best_pts') || '0');
+            document.getElementById('gameover-best').textContent =
+                best > 0 ? 'BEST  ' + best : '';
+            overlay.classList.remove('fading', 'hidden');
+        };
+        function hideGameOver(cb) {
+            const overlay = document.getElementById('gameover-overlay');
+            overlay.classList.add('fading');
+            setTimeout(() => { overlay.classList.add('hidden'); cb?.(); }, 400);
+        }
+        document.getElementById('gameover-play-btn').addEventListener('click', () => {
+            hideGameOver(() => init());
+        });
+        document.getElementById('gameover-menu-btn').addEventListener('click', () => {
+            hideGameOver(() => {
+                init();
+                const menu = document.getElementById('main-menu');
+                menu.classList.remove('fading', 'hidden');
+            });
+        });
+    })();
+    </script>
+
+    <script>
+    /* ── Main menu ── */
+    (function() {
+        const menu          = document.getElementById('main-menu');
+        const mainView      = document.getElementById('menu-main-view');
+        const settingsView  = document.getElementById('menu-settings-view');
+        const menuCbToggle  = document.getElementById('menu-cb-toggle');
+        const gameCbToggle  = document.getElementById('cb-toggle');
+
+        function showMainView() {
+            settingsView.classList.remove('visible');
+            mainView.classList.remove('gone');
+        }
+        function showSettingsView() {
+            mainView.classList.add('gone');
+            settingsView.classList.add('visible');
+        }
+
+        function closeMenu() {
+            menu.classList.add('fading');
+            setTimeout(() => menu.classList.add('hidden'), 370);
+        }
+
+        document.getElementById('menu-play-btn').addEventListener('click', () => {
+            closeMenu();
+            // Show intro tutorial after menu fades (first time only)
+            setTimeout(() => showIntroTutorial(false), 400);
+        });
+
+        document.getElementById('menu-howto-btn').addEventListener('click', () => {
+            closeMenu();
+            window.onTutorialClosed = () => { menu.classList.remove('fading', 'hidden'); };
+            setTimeout(() => showIntroTutorial(true), 400);
+        });
+
+        document.getElementById('menu-settings-nav-btn').addEventListener('click', showSettingsView);
+        document.getElementById('menu-back-btn').addEventListener('click', showMainView);
+
+        document.getElementById('menu-reset-tut-btn').addEventListener('click', () => {
+            resetTutorials();
+            // brief visual feedback
+            const el = document.getElementById('menu-reset-tut-btn');
+            const orig = el.querySelector('span').textContent;
+            el.querySelector('span').textContent = 'Done!';
+            setTimeout(() => el.querySelector('span').textContent = orig, 1200);
+        });
+
+        /* keep colorblind toggles in sync */
+        menuCbToggle.addEventListener('change', (e) => {
+            gameCbToggle.checked = e.target.checked;
+            switchPalette(e.target.checked ? 'colorblind' : 'normal');
+        });
+        gameCbToggle.addEventListener('change', (e) => {
+            menuCbToggle.checked = e.target.checked;
+        });
+    })();
+    </script>
+
+    <script>
+    /* ── GLORB logo animation ── */
+    (function() {
+        const TAU = Math.PI * 2;
+        const COLORS = ['#ff4455','#44aaff','#ffdd33','#44ee88','#ff8800','#cc44ff'];
+        const lc = document.getElementById('logo-canvas');
+        if (!lc) return;
+        const ltc = lc.getContext('2d');
+        const dpr = window.devicePixelRatio || 1;
+        const LW = 40, LH = 46;
+        lc.width = LW * dpr;
+        lc.height = LH * dpr;
+        ltc.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        const cx = LW / 2, cy = LH / 2;
+        const OR = 11, OP = 16;
+        let ang = 0, colorPhase = 0;
+
+        function hexRgb(h) {
+            return [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)];
+        }
+        function lerpColor() {
+            const i = Math.floor(colorPhase) % COLORS.length;
+            const j = (i + 1) % COLORS.length;
+            const t = colorPhase - Math.floor(colorPhase);
+            const [r1,g1,b1] = hexRgb(COLORS[i]);
+            const [r2,g2,b2] = hexRgb(COLORS[j]);
+            return `rgb(${Math.round(r1+(r2-r1)*t)},${Math.round(g1+(g2-g1)*t)},${Math.round(b1+(b2-b1)*t)})`;
+        }
+
+        function frame() {
+            ltc.clearRect(0, 0, LW, LH);
+            // Orb ring (empty inside)
+            ltc.save();
+            ltc.shadowBlur = 14; ltc.shadowColor = 'rgba(255,255,255,0.55)';
+            ltc.fillStyle = 'rgba(0,0,0,0)';
+            ltc.strokeStyle = 'rgba(255,255,255,0.88)'; ltc.lineWidth = 1.8;
+            ltc.beginPath(); ltc.arc(cx, cy, OR, 0, TAU); ltc.stroke();
+            ltc.restore();
+            // Revolving color-changing particle
+            ang += 0.03;
+            colorPhase += 0.007;
+            const color = lerpColor();
+            const px = cx + Math.cos(ang) * OP, py = cy + Math.sin(ang) * OP;
+            ltc.save();
+            ltc.shadowBlur = 10; ltc.shadowColor = color; ltc.fillStyle = color;
+            ltc.beginPath(); ltc.arc(px, py, 3, 0, TAU); ltc.fill();
+            ltc.restore();
+            requestAnimationFrame(frame);
+        }
+        frame();
+    })();
+    </script>
+</body>
+</html>

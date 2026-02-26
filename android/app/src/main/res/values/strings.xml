@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">LUXORB</string>
+    <string name="title_activity_main">LUXORB</string>
+    <string name="package_name">com.orbgame.app</string>
+    <string name="custom_url_scheme">com.orbgame.app</string>
+</resources>

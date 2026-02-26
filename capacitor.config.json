@@ -1,0 +1,8 @@
+{
+  "appId": "com.orbgame.app",
+  "appName": "LUXORB",
+  "webDir": "www",
+  "android": {
+    "backgroundColor": "#111111"
+  }
+}
