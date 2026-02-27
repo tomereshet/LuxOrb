@@ -804,6 +804,7 @@ function update() {
     for (let i = 0; i < aliveOrbs.length; i++) {
         for (let j = i + 1; j < aliveOrbs.length; j++) {
             const a = aliveOrbs[i], b = aliveOrbs[j];
+            if ((a.crystallized && a.crystallizedBy === b) || (b.crystallized && b.crystallizedBy === a)) continue;
             const dx = b.x - a.x, dy = b.y - a.y;
             const d = Math.sqrt(dx * dx + dy * dy);
             if (d < ORB_REPEL_DIST && d > 0.1) {
@@ -834,9 +835,16 @@ function update() {
         const src = orb.crystallizedBy;
         const dx = src.x - orb.x, dy = src.y - orb.y;
         const d = Math.sqrt(dx * dx + dy * dy);
-        if (d > ORB_RADIUS * 2 && d > 0.1) {
+        const minDist = ORB_RADIUS * 2.5;
+        if (d > minDist) {
             orb.vx += (dx / d) * CRYSTAL_PULL_STRENGTH;
             orb.vy += (dy / d) * CRYSTAL_PULL_STRENGTH;
+        } else if (d > 0.1 && d < minDist) {
+            const push = (minDist - d) / minDist * 0.5;
+            orb.vx -= (dx / d) * push;
+            orb.vy -= (dy / d) * push;
+            src.vx += (dx / d) * push;
+            src.vy += (dy / d) * push;
         }
     }
     // Crystal shell repels other orbs (stronger than normal)
