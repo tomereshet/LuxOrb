@@ -2,6 +2,6 @@
 <resources>
     <string name="app_name">LUXORB</string>
     <string name="title_activity_main">LUXORB</string>
-    <string name="package_name">com.orbgame.app</string>
-    <string name="custom_url_scheme">com.orbgame.app</string>
+    <string name="package_name">com.luxorb.app</string>
+    <string name="custom_url_scheme">com.luxorb.app</string>
 </resources>

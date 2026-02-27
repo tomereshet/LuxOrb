@@ -20,7 +20,20 @@ const PALETTES = {
     colorblind: ['#E69F00', '#56B4E9', '#009E73', '#F0E442', '#0072B2', '#CC79A7']
 };
 let PARTICLE_COLORS = [...PALETTES.normal];
-const EFFECTS = ['spawn3', 'rocket', 'blip', 'fireworks'];
+const EFFECTS = ['spawn3', 'rocket', 'blip', 'fireworks', 'crystalize'];
+const CRYSTAL_CHECK_INTERVAL = 120;  // ~2s between passive attempts
+const CRYSTAL_CHANCE = 0.2;
+const CRYSTAL_PULL_STRENGTH = 0.15;
+const CRYSTAL_REPEL_DIST = ORB_RADIUS * 4;    // repels orbs within 80px
+const CRYSTAL_REPEL_STR = 0.6;
+const CRYSTAL_PARTICLE_REPEL_DIST = ORB_RADIUS * 3;
+const CRYSTAL_PARTICLE_REPEL_STR = 180;        // inverse-square coeff
+const WORM_SEGMENT_COUNT = 15;
+const SEGMENT_SPACING = 10;
+const WORM_SPEED = 3;
+const WORM_TURN_RATE = 0.12;
+const WORM_AVOID_RADIUS = ORB_RADIUS * 1.8;
+const WORM_EXIT_AFTER = 600; // frames (~10s at 60fps)
 
 // --- State ---
 let cW, cH;
@@ -36,6 +49,9 @@ let bestPoints = parseInt(localStorage.getItem('best_pts') || '0');
 let stars = [];
 let starAngle = 0;
 let blipToast = null; // { x, y, vy, alpha }
+let worm = null;       // { segments[], targetX, targetY, headAngle, speed, alive, spawnAlpha, age }
+let wormCooldown = 0;
+let wormSpawnChecked = false;
 
 // --- Palette switching ---
 function switchPalette(name) {
@@ -50,6 +66,7 @@ function switchPalette(name) {
     }
     for (const p of freeParticles) p.color = remap(p.color);
     for (const d of debris) d.color = remap(d.color);
+    if (worm) for (const seg of worm.segments) seg.color = remap(seg.color);
 }
 
 // --- Resize ---
@@ -77,9 +94,15 @@ function spawn3Chance() {
 }
 
 function pickEffect() {
-    return Math.random() < spawn3Chance()
-        ? 'spawn3'
-        : EFFECTS.filter(e => e !== 'spawn3')[Math.floor(Math.random() * 3)];
+    if (Math.random() < spawn3Chance()) return 'spawn3';
+    const blipCount = orbs.filter(o => o.alive && !o.dying && o.effect === 'blip').length;
+    const currentLevel = Math.floor(score / LEVEL_SIZE) + 1;
+    const pool = EFFECTS.filter(e =>
+        e !== 'spawn3' &&
+        !(e === 'blip' && blipCount >= 3) &&
+        !(e === 'crystalize' && currentLevel < 7)
+    );
+    return pool[Math.floor(Math.random() * pool.length)];
 }
 
 function makeOrb(x, y) {
@@ -89,12 +112,14 @@ function makeOrb(x, y) {
         x, y, alive: true,
         alpha: 0, spawning: true, dying: false,
         rotation: Math.random() * TAU,
-        recipe: makeRecipe(effect === 'blip' ? 2 : 3),
+        recipe: makeRecipe(effect === 'blip' || effect === 'fireworks' || effect === 'crystalize' ? 2 : 3),
         effect,
         overloadPhase: null, overloadT: 0,
         vx: 0, vy: 0,
         splitting: false, splitT: 0, splitDirX: 0, splitDirY: 0, splitParticlesB: [],
         blipPulse: 0,
+        crystalTarget: null, crystalTimer: 0, crystalUsed: false,
+        crystallized: false, crystallizedBy: null, crystalVerts: null, crystalPulse: 0,
         particles: []
     };
     const phase2 = (phase + Math.PI) % TAU;
@@ -127,11 +152,13 @@ function makeOrbFromSplit(x, y, particles) {
         alpha: 1, spawning: false, dying: false,
         splitting: false, splitT: 0, splitDirX: 0, splitDirY: 0, splitParticlesB: [],
         rotation: Math.random() * TAU,
-        recipe: makeRecipe(effect === 'blip' ? 2 : 3),
+        recipe: makeRecipe(effect === 'blip' || effect === 'fireworks' || effect === 'crystalize' ? 2 : 3),
         effect,
         overloadPhase: null, overloadT: 0,
         vx: 0, vy: 0,
         blipPulse: 0,
+        crystalTarget: null, crystalTimer: 0, crystalUsed: false,
+        crystallized: false, crystallizedBy: null, crystalVerts: null, crystalPulse: 0,
         particles
     };
     redistributeParticles(orb);
@@ -139,6 +166,7 @@ function makeOrbFromSplit(x, y, particles) {
 }
 
 function startSplit(orb) {
+    if (orb.effect === 'crystalize') releaseCrystalVictim(orb);
     // Blip any particles beyond 9
     while (orb.particles.length > 9) {
         const idx = Math.floor(Math.random() * orb.particles.length);
@@ -152,6 +180,8 @@ function startSplit(orb) {
     }
     orb.splitting = true;
     orb.splitT = 0;
+    orb.overloadPhase = null;
+    orb.overloadT = 0;
     const angle = Math.random() * TAU;
     orb.splitDirX = Math.cos(angle);
     orb.splitDirY = Math.sin(angle);
@@ -216,6 +246,66 @@ function angleDiff(from, to) {
     return d;
 }
 
+function pointToSegmentDist(p, a, b) {
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq < 0.01) return dist(p, a);
+    let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq;
+    t = Math.max(0, Math.min(1, t));
+    return dist(p, { x: a.x + t * dx, y: a.y + t * dy });
+}
+
+function pickWormTarget() {
+    const pad = 80;
+    let x, y, attempts = 0;
+    do {
+        x = randomBetween(pad, cW - pad);
+        y = randomBetween(pad, cH - pad);
+        attempts++;
+    } while (
+        attempts < 100 &&
+        orbs.some(o => o.alive && dist(o, { x, y }) < WORM_AVOID_RADIUS * 1.5)
+    );
+    return { x, y };
+}
+
+// --- Crystal helpers ---
+function generateCrystalVerts() {
+    const R = ORB_RADIUS * 1.6;
+    const numPts = 10;
+    // Scatter points on a circle, ensuring all 4 quadrants get at least 2
+    const angles = [];
+    const quadrantRanges = [[0, Math.PI/2], [Math.PI/2, Math.PI], [Math.PI, Math.PI*1.5], [Math.PI*1.5, TAU]];
+    for (const [lo, hi] of quadrantRanges) {
+        angles.push(lo + Math.random() * (hi - lo));
+        angles.push(lo + Math.random() * (hi - lo));
+    }
+    while (angles.length < numPts) angles.push(Math.random() * TAU);
+    angles.sort((a, b) => a - b);
+    const pts = angles.map(a => {
+        const r = R * (0.85 + Math.random() * 0.3);
+        return { x: Math.cos(a) * r, y: Math.sin(a) * r };
+    });
+    // Fan triangulation of the convex polygon
+    const tris = [];
+    for (let i = 1; i < pts.length - 1; i++) {
+        const shade = Math.floor(100 + Math.random() * 155);
+        const alpha = 0.2 + Math.random() * 0.15;
+        tris.push({ x1: pts[0].x, y1: pts[0].y, x2: pts[i].x, y2: pts[i].y, x3: pts[i+1].x, y3: pts[i+1].y, shade, alpha });
+    }
+    return tris;
+}
+
+function releaseCrystalVictim(crystalOrb) {
+    const victim = crystalOrb.crystalTarget;
+    if (!victim) return;
+    victim.crystallized = false;
+    victim.crystallizedBy = null;
+    victim.crystalVerts = null;
+    crystalOrb.crystalTarget = null;
+    crystalOrb.crystalUsed = true;
+}
+
 // --- Redistribute particles evenly around orb ---
 function redistributeParticles(orb) {
     const n = orb.particles.length;
@@ -263,6 +353,9 @@ function init() {
     points = 0;
     blackHole = null;
     bhCooldown = 0;
+    worm = null;
+    wormCooldown = 0;
+    wormSpawnChecked = false;
     initStars();
     const pad = 80;
     for (let i = 0; i < NUM_ORBS; i++) {
@@ -289,7 +382,7 @@ function isRecipeFulfilled(orb) {
 function stealParticles(count) {
     const pool = [];
     for (const orb of orbs) {
-        if (!orb.alive || orb.dying) continue;
+        if (!orb.alive || orb.dying || orb.crystallized) continue;
         for (const p of orb.particles) {
             const angle = orb.rotation + p.phase;
             pool.push({ orb, particle: p,
@@ -372,7 +465,7 @@ function orbBlip(orb) {
 
 function effectFireworks() {
     const pad = 60;
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 10; i++) {
         const x = randomBetween(pad, cW - pad);
         const y = randomBetween(pad, cH - pad);
         const color = PARTICLE_COLORS[Math.floor(Math.random() * PARTICLE_COLORS.length)];
@@ -387,15 +480,17 @@ function effectFireworks() {
 function triggerEffect(orb) {
     points += 10;
     updateHUD();
-    if      (orb.effect === 'spawn3')    { spawnOrb(orb.x, orb.y); spawnOrb(orb.x, orb.y); spawnOrb(orb.x, orb.y); }
-    else if (orb.effect === 'rocket')    { effectRocket(); }
-    else if (orb.effect === 'blip')      { effectBlip(); }
-    else if (orb.effect === 'fireworks') { effectFireworks(); }
+    if      (orb.effect === 'spawn3')     { spawnOrb(orb.x, orb.y); spawnOrb(orb.x, orb.y); spawnOrb(orb.x, orb.y); }
+    else if (orb.effect === 'rocket')     { effectRocket(); }
+    else if (orb.effect === 'blip')       { effectBlip(); }
+    else if (orb.effect === 'fireworks')  { effectFireworks(); }
+    else if (orb.effect === 'crystalize') { releaseCrystalVictim(orb); }
 }
 
 // --- Die / explode ---
 function onOrbFired(dyingOrb) {
     if (bhCooldown > 0) bhCooldown--;
+    wormSpawnChecked = false;
     // Each alive blip orb drains one particle when any other orb is fired
     for (const blipOrb of orbs) {
         if (!blipOrb.alive || blipOrb.dying || blipOrb.splitting) continue;
@@ -403,7 +498,7 @@ function onOrbFired(dyingOrb) {
         if (Math.random() > 0.30) continue;
         const victims = [];
         for (const other of orbs) {
-            if (other === blipOrb || other === dyingOrb || !other.alive || other.dying || other.splitting) continue;
+            if (other === blipOrb || other === dyingOrb || !other.alive || other.dying || other.splitting || other.crystallized) continue;
             for (const p of other.particles) victims.push({ orb: other, particle: p });
         }
         if (victims.length === 0) continue;
@@ -423,6 +518,8 @@ function onOrbFired(dyingOrb) {
 }
 
 function startDying(orb, dirX, dirY) {
+    if (orb.crystallized) return; // crystallized victims cannot die
+    if (orb.effect === 'crystalize') releaseCrystalVictim(orb);
     orb.dying = true;
     orb._dirX = dirX;
     orb._dirY = dirY;
@@ -434,11 +531,12 @@ function isDeadlocked() {
     const alive = orbs.filter(o => o.alive && !o.dying && !o.spawning);
     if (alive.length === 0) return true;
     if (alive.some(o => o.splitting)) return false; // split in progress — new orb pending
-    return alive.every(o => o.effect === 'blip' && !isRecipeFulfilled(o));
+    return alive.every(o => o.crystallized || ((o.effect === 'blip' || o.effect === 'crystalize') && !isRecipeFulfilled(o)));
 }
 
 function completeDeath(orb) {
     orb.alive = false;
+    if (orb.effect === 'crystalize') releaseCrystalVictim(orb);
     const { _dirX: dirX, _dirY: dirY } = orb;
     for (const p of orb.particles) {
         const angle = orb.rotation + p.phase;
@@ -456,7 +554,7 @@ function completeDeath(orb) {
         });
     }
     orb.particles = [];
-    if (orb._recipeFulfilled) triggerEffect(orb);
+    if (orb._recipeFulfilled && !orb.crystallized) triggerEffect(orb);
     if (blackHole && blackHole.pullingOrb === orb) { blackHole = null; bhCooldown = 5; }
     points++;
     score++;
@@ -491,8 +589,10 @@ function onPointerUp() {
     const dy = drag.y - drag.orb.y;
     const len = Math.sqrt(dx * dx + dy * dy);
     if (len >= MIN_DRAG && drag.orb.alive && !drag.orb.dying) {
-        const blipLocked = drag.orb.effect === 'blip' && !isRecipeFulfilled(drag.orb);
-        if (!blipLocked) {
+        const recipeLocked = (drag.orb.effect === 'blip' || drag.orb.effect === 'crystalize') && !isRecipeFulfilled(drag.orb);
+        if (drag.orb.crystallized) {
+            // Crystallized orbs can't be fired — crystal makes it obvious
+        } else if (!recipeLocked) {
             startDying(drag.orb, dx / len, dy / len);
         } else {
             blipToast = { x: drag.orb.x, y: drag.orb.y - ORB_RADIUS - 18, vy: -0.35, alpha: 1.0 };
@@ -545,7 +645,7 @@ function checkBlackHoleComplete() {
     if (!PARTICLE_COLORS.every(c => blackHole.particles.some(p => p.color === c))) return;
     let closest = null, closestDist = Infinity;
     for (const orb of orbs) {
-        if (!orb.alive || orb.dying || orb.splitting) continue;
+        if (!orb.alive || orb.dying || orb.splitting || orb.crystallized) continue;
         const d = dist(orb, blackHole);
         if (d < closestDist) { closestDist = d; closest = orb; }
     }
@@ -556,6 +656,57 @@ function checkBlackHoleComplete() {
     const len = Math.sqrt(dx * dx + dy * dy) || 1;
     startDying(closest, dx / len, dy / len);
     closest._recipeFulfilled = true; // always trigger effect
+}
+
+// --- Worm ---
+function spawnWorm() {
+    // Enter from a random screen edge, aimed inward
+    const side = Math.floor(Math.random() * 4);
+    let x, y, headAngle;
+    if (side === 0) { // top
+        x = randomBetween(60, cW - 60); y = -SEGMENT_SPACING;
+        headAngle = Math.PI / 2 + (Math.random() - 0.5) * 0.8;
+    } else if (side === 1) { // bottom
+        x = randomBetween(60, cW - 60); y = cH + SEGMENT_SPACING;
+        headAngle = -Math.PI / 2 + (Math.random() - 0.5) * 0.8;
+    } else if (side === 2) { // left
+        x = -SEGMENT_SPACING; y = randomBetween(60, cH - 60);
+        headAngle = (Math.random() - 0.5) * 0.8;
+    } else { // right
+        x = cW + SEGMENT_SPACING; y = randomBetween(60, cH - 60);
+        headAngle = Math.PI + (Math.random() - 0.5) * 0.8;
+    }
+    const segments = [];
+    for (let i = 0; i < WORM_SEGMENT_COUNT; i++) {
+        segments.push({
+            x: x - Math.cos(headAngle) * SEGMENT_SPACING * i,
+            y: y - Math.sin(headAngle) * SEGMENT_SPACING * i,
+            color: PARTICLE_COLORS[Math.floor(Math.random() * PARTICLE_COLORS.length)]
+        });
+    }
+    worm = { segments, targetX: 0, targetY: 0, headAngle, speed: WORM_SPEED, alive: true, spawnAlpha: 1, age: 0 };
+    const t = pickWormTarget();
+    worm.targetX = t.x;
+    worm.targetY = t.y;
+}
+
+function explodeWorm() {
+    if (!worm) return;
+    for (const seg of worm.segments) {
+        const angle = Math.random() * TAU;
+        const speed = 1.5 + Math.random() * 2.0;
+        freeParticles.push({
+            x: seg.x, y: seg.y,
+            vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
+            gx: 0, gy: 0, useOrbGravity: true, color: seg.color
+        });
+        for (let i = 0; i < 6; i++) {
+            const da = Math.random() * TAU, spd = 0.3 + Math.random() * 0.8;
+            debris.push({ x: seg.x, y: seg.y, vx: Math.cos(da) * spd, vy: Math.sin(da) * spd, color: seg.color, r: PARTICLE_RADIUS * 0.6 });
+        }
+    }
+    worm = null;
+    wormCooldown = 300;
 }
 
 // --- Update ---
@@ -569,10 +720,12 @@ function update() {
     const pendingDeath = [];
     for (const orb of orbs) {
         if (!orb.alive) continue;
-        orb.rotation += ORBIT_SPEED;
-        for (const p of orb.particles) {
-            p.phase += angleDiff(p.phase, p.targetPhase) * PHASE_LERP;
-            p.r += (ORBIT_RADIUS - p.r) * RADIUS_LERP;
+        if (!orb.crystallized) {
+            orb.rotation += ORBIT_SPEED;
+            for (const p of orb.particles) {
+                p.phase += angleDiff(p.phase, p.targetPhase) * PHASE_LERP;
+                p.r += (ORBIT_RADIUS - p.r) * RADIUS_LERP;
+            }
         }
         if (orb.splitting) {
             for (const p of orb.splitParticlesB) {
@@ -592,9 +745,10 @@ function update() {
         } else {
             // Decay blip pulse glow
             if (orb.blipPulse > 0) orb.blipPulse = Math.max(0, orb.blipPulse - 1 / 30);
-            if (orb.particles.length >= 10) {
+            if (orb.crystalPulse > 0) orb.crystalPulse = Math.max(0, orb.crystalPulse - 1 / 30);
+            if (!orb.crystallized && orb.particles.length >= 10) {
                 startSplit(orb);
-            } else {
+            } else if (!orb.crystallized) {
             // Overload: fires when orb holds all 6 colors at once
             if (!orb.overloadPhase) {
                 if (PARTICLE_COLORS.every(c => orb.particles.some(p => p.color === c))) {
@@ -615,6 +769,28 @@ function update() {
         }
     }
     for (const orb of pendingDeath) completeDeath(orb);
+
+    // --- Crystalize passive mechanic ---
+    for (const orb of orbs) {
+        if (!orb.alive || orb.dying || orb.spawning || orb.splitting) continue;
+        if (orb.effect !== 'crystalize' || orb.crystalTarget || orb.crystalUsed) continue;
+        orb.crystalTimer++;
+        if (orb.crystalTimer < CRYSTAL_CHECK_INTERVAL) continue;
+        orb.crystalTimer = 0;
+        if (Math.random() > CRYSTAL_CHANCE) continue;
+        const candidates = orbs.filter(o =>
+            o !== orb && o.alive && !o.dying && !o.splitting && !o.spawning &&
+            o.effect !== 'crystalize' && !o.crystallized
+        );
+        if (candidates.length === 0) continue;
+        const target = candidates[Math.floor(Math.random() * candidates.length)];
+        orb.crystalTarget = target;
+        target.crystallized = true;
+        target.crystallizedBy = orb;
+        target.crystalVerts = generateCrystalVerts();
+        orb.crystalPulse = 1;
+        window.onCrystalizeHappened?.();
+    }
 
     // Orb repulsion — push alive orbs apart so they never overlap
     const aliveOrbs = orbs.filter(o => o.alive);
@@ -652,6 +828,31 @@ function update() {
         }
         blackHole.spiralAngle += 0.025;
     }
+    // Crystal pull: victim pulled toward crystalize orb
+    for (const orb of aliveOrbs) {
+        if (!orb.crystallized || !orb.crystallizedBy || !orb.crystallizedBy.alive) continue;
+        const src = orb.crystallizedBy;
+        const dx = src.x - orb.x, dy = src.y - orb.y;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        if (d > ORB_RADIUS * 2 && d > 0.1) {
+            orb.vx += (dx / d) * CRYSTAL_PULL_STRENGTH;
+            orb.vy += (dy / d) * CRYSTAL_PULL_STRENGTH;
+        }
+    }
+    // Crystal shell repels other orbs (stronger than normal)
+    for (const a of aliveOrbs) {
+        if (!a.crystallized) continue;
+        for (const b of aliveOrbs) {
+            if (b === a || b === a.crystallizedBy) continue;
+            const dx = b.x - a.x, dy = b.y - a.y;
+            const d = Math.sqrt(dx * dx + dy * dy);
+            if (d < CRYSTAL_REPEL_DIST && d > 0.1) {
+                const f = (CRYSTAL_REPEL_DIST - d) / CRYSTAL_REPEL_DIST * CRYSTAL_REPEL_STR;
+                b.vx += (dx / d) * f;
+                b.vy += (dy / d) * f;
+            }
+        }
+    }
     for (const orb of aliveOrbs) {
         if (orb.x < WALL_ZONE)                orb.vx += (WALL_ZONE - orb.x) / WALL_ZONE * WALL_STR;
         if (orb.x > cW  - WALL_ZONE) orb.vx -= (orb.x - (cW  - WALL_ZONE)) / WALL_ZONE * WALL_STR;
@@ -683,7 +884,7 @@ function update() {
         // Gravity: directional until first wall hit, then orb gravity
         if (p.useOrbGravity) {
             for (const orb of orbs) {
-                if (!orb.alive || orb.dying || orb === p.skipOrb) continue;
+                if (!orb.alive || orb.dying || orb === p.skipOrb || orb.crystallized) continue;
                 const dx = orb.x - p.x;
                 const dy = orb.y - p.y;
                 const d2 = dx * dx + dy * dy;
@@ -696,6 +897,18 @@ function update() {
         } else {
             p.vx += p.gx;
             p.vy += p.gy;
+        }
+        // Crystal shell repels free particles
+        for (const orb of orbs) {
+            if (!orb.alive || !orb.crystallized) continue;
+            const dx = p.x - orb.x, dy = p.y - orb.y;
+            const d2 = dx * dx + dy * dy;
+            const d = Math.sqrt(d2);
+            if (d < CRYSTAL_PARTICLE_REPEL_DIST && d > 1) {
+                const force = CRYSTAL_PARTICLE_REPEL_STR / d2;
+                p.vx += (dx / d) * force;
+                p.vy += (dy / d) * force;
+            }
         }
 
         // Black hole attraction
@@ -726,7 +939,7 @@ function update() {
         }
         if (!captured) {
             for (const orb of orbs) {
-                if (!orb.alive || orb.dying || orb === p.skipOrb) continue;
+                if (!orb.alive || orb.dying || orb === p.skipOrb || orb.crystallized) continue;
                 if (dist(p, orb) < CAPTURE_RADIUS) {
                     const captureAngle = Math.atan2(p.y - orb.y, p.x - orb.x);
                     const phase = captureAngle - orb.rotation;
@@ -750,10 +963,144 @@ function update() {
         d.r -= (d.lifeRate ?? 0.11);
         if (d.r <= 0) debris.splice(i, 1);
     }
+
+    // --- Worm cooldown ---
+    if (wormCooldown > 0) wormCooldown--;
+
+    // --- Worm update ---
+    if (worm && worm.alive) {
+        worm.age++;
+
+        const head = worm.segments[0];
+
+        // After 5s, aim for the nearest screen edge to exit
+        if (worm.age >= WORM_EXIT_AFTER) {
+            const toLeft = head.x, toRight = cW - head.x;
+            const toTop = head.y, toBottom = cH - head.y;
+            const min = Math.min(toLeft, toRight, toTop, toBottom);
+            if (min === toLeft) { worm.targetX = -80; worm.targetY = head.y; }
+            else if (min === toRight) { worm.targetX = cW + 80; worm.targetY = head.y; }
+            else if (min === toTop) { worm.targetX = head.x; worm.targetY = -80; }
+            else { worm.targetX = head.x; worm.targetY = cH + 80; }
+        } else if (dist(head, { x: worm.targetX, y: worm.targetY }) < 40 || worm.age % 120 === 0) {
+            // Normal wandering: re-pick target when close or periodically
+            const t = pickWormTarget();
+            worm.targetX = t.x;
+            worm.targetY = t.y;
+        }
+
+        // Desired angle toward target
+        const desiredAngle = Math.atan2(worm.targetY - head.y, worm.targetX - head.x);
+
+        // Soft avoidance from orb centers (only prevents direct collision)
+        let avoidX = 0, avoidY = 0;
+        for (const orb of orbs) {
+            if (!orb.alive) continue;
+            const d = dist(head, orb);
+            if (d < WORM_AVOID_RADIUS && d > 1) {
+                const strength = (WORM_AVOID_RADIUS - d) / WORM_AVOID_RADIUS;
+                avoidX += ((head.x - orb.x) / d) * strength;
+                avoidY += ((head.y - orb.y) / d) * strength;
+            }
+        }
+        if (blackHole) {
+            const d = dist(head, blackHole);
+            if (d < WORM_AVOID_RADIUS && d > 1) {
+                const strength = (WORM_AVOID_RADIUS - d) / WORM_AVOID_RADIUS;
+                avoidX += ((head.x - blackHole.x) / d) * strength;
+                avoidY += ((head.y - blackHole.y) / d) * strength;
+            }
+        }
+
+        // Blend target direction with avoidance
+        const avoidLen = Math.sqrt(avoidX * avoidX + avoidY * avoidY);
+        let finalAngle;
+        if (avoidLen > 0.01) {
+            const avoidAngle = Math.atan2(avoidY, avoidX);
+            const weight = Math.min(avoidLen * 2, 0.7);
+            finalAngle = desiredAngle + angleDiff(desiredAngle, avoidAngle) * weight;
+        } else {
+            finalAngle = desiredAngle;
+        }
+
+        // Turn rate limit
+        const diff = angleDiff(worm.headAngle, finalAngle);
+        worm.headAngle += Math.sign(diff) * Math.min(Math.abs(diff), WORM_TURN_RATE);
+
+        // Move head
+        head.x += Math.cos(worm.headAngle) * WORM_SPEED;
+        head.y += Math.sin(worm.headAngle) * WORM_SPEED;
+
+        // Body follow
+        for (let i = 1; i < worm.segments.length; i++) {
+            const prev = worm.segments[i - 1];
+            const seg = worm.segments[i];
+            const sdx = prev.x - seg.x, sdy = prev.y - seg.y;
+            const sd = Math.sqrt(sdx * sdx + sdy * sdy);
+            if (sd > SEGMENT_SPACING) {
+                seg.x = prev.x - (sdx / sd) * SEGMENT_SPACING;
+                seg.y = prev.y - (sdy / sd) * SEGMENT_SPACING;
+            }
+        }
+
+        // Check if fully off-screen (all segments outside canvas)
+        const margin = PARTICLE_RADIUS * 2;
+        const allOff = worm.segments.every(s =>
+            s.x < -margin || s.x > cW + margin || s.y < -margin || s.y > cH + margin
+        );
+        if (allOff && worm.age > 60) {
+            worm = null;
+            wormCooldown = 300;
+        }
+
+        // Collision with free particles
+        if (worm) {
+            let hit = false;
+            for (const p of freeParticles) {
+                for (const seg of worm.segments) {
+                    if (dist(p, seg) < PARTICLE_RADIUS * 2.5) { hit = true; break; }
+                }
+                if (hit) break;
+                for (let i = 0; i < worm.segments.length - 1; i++) {
+                    if (pointToSegmentDist(p, worm.segments[i], worm.segments[i + 1]) < PARTICLE_RADIUS + 2) {
+                        hit = true; break;
+                    }
+                }
+                if (hit) break;
+            }
+            if (hit) explodeWorm();
+        }
+    }
+
+    // --- Worm spawn (after turn settles) ---
+    if (!wormSpawnChecked && !worm && wormCooldown === 0) {
+        const settled = freeParticles.length === 0
+            && !orbs.some(o => o.alive && (o.dying || o.splitting || o.spawning));
+        if (settled) {
+            wormSpawnChecked = true;
+            const currentLevel = Math.floor(score / LEVEL_SIZE) + 1;
+            if (currentLevel >= 5 && Math.random() < 0.15) {
+                // Show tutorial first, then spawn after 2s
+                window.onWormIncoming?.();
+            }
+        }
+    }
 }
 
 // --- Draw ---
 function drawOrb(orb) {
+    // Crystalize orb: expanding pink ring when it captures a target
+    if (orb.crystalPulse > 0) {
+        const cp = orb.crystalPulse;
+        const ringR = ORB_RADIUS * (1 + (1 - cp) * 1.6);
+        ctx.save();
+        ctx.shadowBlur = 22 * cp; ctx.shadowColor = 'rgba(255,100,200,0.9)';
+        ctx.strokeStyle = `rgba(255,130,200,${cp * 0.85})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(orb.x, orb.y, ringR, 0, TAU); ctx.stroke();
+        ctx.restore();
+    }
+
     // Blip orb: expanding red ring when it drains a particle
     if (orb.blipPulse > 0) {
         const bp = orb.blipPulse;
@@ -858,6 +1205,30 @@ function drawOrb(orb) {
                 ctx.stroke();
                 ctx.beginPath(); ctx.arc(Math.cos(a) * 8, Math.sin(a) * 8, 1.3, 0, TAU); ctx.fill();
             }
+            ctx.restore();
+
+        } else if (orb.effect === 'crystalize') {
+            // Diamond/crystal shape
+            ctx.save();
+            ctx.translate(ix, iy);
+            // Top pentagon
+            ctx.beginPath();
+            ctx.moveTo(0, -9);
+            ctx.lineTo(-6, -3);
+            ctx.lineTo(-4, 3);
+            ctx.lineTo(4, 3);
+            ctx.lineTo(6, -3);
+            ctx.closePath();
+            ctx.strokeStyle = 'rgba(255,160,220,0.8)';
+            ctx.stroke();
+            // Inner facets
+            ctx.beginPath(); ctx.moveTo(-6, -3); ctx.lineTo(0, 5); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(6, -3); ctx.lineTo(0, 5); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, -9); ctx.lineTo(0, 5); ctx.stroke();
+            // Bottom point
+            ctx.beginPath();
+            ctx.moveTo(-4, 3); ctx.lineTo(0, 8); ctx.lineTo(4, 3);
+            ctx.stroke();
             ctx.restore();
         }
 
@@ -967,6 +1338,83 @@ function drawSplittingOrb(orb) {
     }
 }
 
+function drawWorm(w) {
+    ctx.save();
+    ctx.globalAlpha = w.spawnAlpha;
+
+    // Connecting white lines
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.lineWidth = 2;
+    ctx.shadowBlur = 8;
+    ctx.shadowColor = 'rgba(255, 255, 255, 0.3)';
+    ctx.beginPath();
+    ctx.moveTo(w.segments[0].x, w.segments[0].y);
+    for (let i = 1; i < w.segments.length; i++) {
+        ctx.lineTo(w.segments[i].x, w.segments[i].y);
+    }
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // Segment dots
+    for (const seg of w.segments) {
+        drawParticle(seg.x, seg.y, seg.color);
+    }
+
+    // Head indicator
+    const head = w.segments[0];
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
+    ctx.beginPath();
+    ctx.arc(head.x, head.y, 2.5, 0, TAU);
+    ctx.fill();
+
+    ctx.restore();
+}
+
+function drawCrystalOverlay(orb) {
+    ctx.save();
+    ctx.translate(orb.x, orb.y);
+    for (const tri of orb.crystalVerts) {
+        ctx.beginPath();
+        ctx.moveTo(tri.x1, tri.y1);
+        ctx.lineTo(tri.x2, tri.y2);
+        ctx.lineTo(tri.x3, tri.y3);
+        ctx.closePath();
+        ctx.fillStyle = `rgba(255, ${tri.shade}, 200, ${tri.alpha})`;
+        ctx.fill();
+    }
+    ctx.restore();
+}
+
+function drawCrystalBeams() {
+    for (const orb of orbs) {
+        if (!orb.alive || orb.effect !== 'crystalize' || !orb.crystalTarget) continue;
+        const target = orb.crystalTarget;
+        if (!target.alive) continue;
+        ctx.save();
+        const grad = ctx.createLinearGradient(orb.x, orb.y, target.x, target.y);
+        grad.addColorStop(0, 'rgba(255, 100, 200, 0.6)');
+        grad.addColorStop(0.5, 'rgba(255, 140, 220, 0.4)');
+        grad.addColorStop(1, 'rgba(255, 100, 200, 0.6)');
+        ctx.strokeStyle = grad;
+        ctx.lineWidth = 2;
+        ctx.shadowBlur = 12;
+        ctx.shadowColor = 'rgba(255, 100, 200, 0.5)';
+        ctx.beginPath();
+        ctx.moveTo(orb.x, orb.y);
+        ctx.lineTo(target.x, target.y);
+        ctx.stroke();
+        // Animated energy dot along beam
+        const beamT = (performance.now() % 1500) / 1500;
+        const bx = orb.x + (target.x - orb.x) * beamT;
+        const by = orb.y + (target.y - orb.y) * beamT;
+        ctx.fillStyle = 'rgba(255, 180, 240, 0.7)';
+        ctx.beginPath();
+        ctx.arc(bx, by, 2.5, 0, TAU);
+        ctx.fill();
+        ctx.restore();
+    }
+}
+
 function drawBlackHole(bh) {
     const R = ORB_RADIUS;
     // Body
@@ -1013,9 +1461,10 @@ function drawAimLine() {
     const tipX = drag.x;
     const tipY = drag.y;
 
-    const isLocked = drag.orb.effect === 'blip' && !isRecipeFulfilled(drag.orb);
-    const lineColor  = isLocked ? 'rgba(255, 80, 80, 0.7)'  : 'rgba(255, 255, 255, 0.55)';
-    const arrowColor = isLocked ? 'rgba(255, 80, 80, 0.85)' : 'rgba(255, 255, 255, 0.75)';
+    const isLocked = drag.orb.crystallized || ((drag.orb.effect === 'blip' || drag.orb.effect === 'crystalize') && !isRecipeFulfilled(drag.orb));
+    const lockColor = drag.orb.crystallized ? [255, 130, 200] : [255, 80, 80];
+    const lineColor  = isLocked ? `rgba(${lockColor},0.7)`  : 'rgba(255, 255, 255, 0.55)';
+    const arrowColor = isLocked ? `rgba(${lockColor},0.85)` : 'rgba(255, 255, 255, 0.75)';
 
     ctx.save();
 
@@ -1076,10 +1525,15 @@ function draw() {
                     p.color
                 );
             }
+            if (orb.crystallized && orb.crystalVerts) {
+                drawCrystalOverlay(orb);
+            }
         }
         ctx.restore();
     }
+    drawCrystalBeams();
     if (blackHole) drawBlackHole(blackHole);
+    if (worm && worm.alive) drawWorm(worm);
 
     for (const p of freeParticles) {
         drawParticle(p.x, p.y, p.color, p.glowColor, p.glowBlur);

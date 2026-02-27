@@ -1022,6 +1022,277 @@
             }
         ];
 
+        /* ── Worm pages ── */
+        // Path function: position along a curving trajectory at time t
+        function wormPathPt(t) {
+            return {
+                x: -20 + t * (TC_W + 40),
+                y: TC_H/2 + Math.sin(t * TAU * 1.5) * 28
+            };
+        }
+        // Build worm segments: head at time t, each segment at earlier time
+        function wormSegs(N, t, step, pathFn) {
+            const segs = [];
+            for (let i = 0; i < N; i++) segs.push(pathFn(t - i * step));
+            return segs;
+        }
+        function drawTutWorm(segs) {
+            tc.save();
+            tc.strokeStyle = 'rgba(255,255,255,0.5)';
+            tc.lineWidth = 2;
+            tc.shadowBlur = 6; tc.shadowColor = 'rgba(255,255,255,0.3)';
+            tc.beginPath();
+            tc.moveTo(segs[0].x, segs[0].y);
+            for (let i = 1; i < segs.length; i++) tc.lineTo(segs[i].x, segs[i].y);
+            tc.stroke();
+            tc.shadowBlur = 0;
+            for (let i = 0; i < segs.length; i++) drawDot(segs[i].x, segs[i].y, 4, COLORS[i % 6]);
+            tc.fillStyle = 'rgba(255,255,255,0.7)';
+            tc.beginPath(); tc.arc(segs[0].x, segs[0].y, 2, 0, TAU); tc.fill();
+            tc.restore();
+        }
+
+        const WORM_PAGES = [
+            {
+                title: 'Incoming Worm!',
+                desc: 'A chain of colored particles is about to slither across the screen, weaving between orbs. It will exit quickly!',
+                draw(t) {
+                    const N = 10;
+                    const segs = wormSegs(N, t, 0.028, wormPathPt);
+                    drawTutWorm(segs);
+                }
+            },
+            {
+                title: 'Hit it with a particle!',
+                desc: 'Fire an orb so its loose particles hit the worm before it escapes. It explodes into 15 free particles you can collect!',
+                draw(t) {
+                    const cx = TC_W / 2, cy = TC_H / 2;
+                    const hitT = 0.42;
+                    const N = 10;
+                    const step = 0.028;
+                    function path2(t2) {
+                        return {
+                            x: TC_W * 0.15 + t2 * TC_W * 0.55,
+                            y: cy + Math.sin(t2 * TAU * 1.2) * 18
+                        };
+                    }
+                    if (t < hitT) {
+                        const wt = t / hitT;
+                        const segs = wormSegs(N, wt, step, path2);
+                        drawTutWorm(segs);
+                        // Incoming particle heading toward worm head
+                        const head = segs[0];
+                        const px = TC_W * 0.05 + wt * (head.x - TC_W * 0.05);
+                        const py = cy + 12 + wt * (head.y - cy - 12);
+                        drawDot(px, py, 4, COLORS[2]);
+                    } else {
+                        // Freeze segments at hit moment, scatter from their positions
+                        const et = (t - hitT) / (1 - hitT);
+                        const segs = wormSegs(N, 1.0, step, path2);
+                        // Use seeded angles so they look random but stable per segment
+                        const angles = [0.3, 2.8, 5.1, 1.5, 4.0, 0.9, 3.5, 5.8, 2.1, 4.7];
+                        for (let i = 0; i < segs.length; i++) {
+                            const s = segs[i];
+                            const a = angles[i];
+                            const d = et * 48;
+                            const al = Math.max(0, 1 - et * 0.85);
+                            tc.save(); tc.globalAlpha = al;
+                            drawDot(s.x + Math.cos(a) * d, s.y + Math.sin(a) * d, 4, COLORS[i % 6]);
+                            tc.restore();
+                        }
+                    }
+                }
+            }
+        ];
+
+        // Generate crystal polygon triangles for tutorial (matches game.js style)
+        function genTutCrystalTris(OR) {
+            const R = OR * 1.6, numPts = 10;
+            const angles = [];
+            const qr = [[0, Math.PI/2], [Math.PI/2, Math.PI], [Math.PI, Math.PI*1.5], [Math.PI*1.5, TAU]];
+            for (const [lo, hi] of qr) { angles.push(lo + Math.random() * (hi - lo)); angles.push(lo + Math.random() * (hi - lo)); }
+            while (angles.length < numPts) angles.push(Math.random() * TAU);
+            angles.sort((a, b) => a - b);
+            const pts = angles.map(a => { const r = R * (0.85 + Math.random() * 0.3); return { x: Math.cos(a) * r, y: Math.sin(a) * r }; });
+            const tris = [];
+            for (let i = 1; i < pts.length - 1; i++) {
+                const shade = Math.floor(100 + Math.random() * 155);
+                const alpha = 0.2 + Math.random() * 0.15;
+                tris.push({ x1: pts[0].x, y1: pts[0].y, x2: pts[i].x, y2: pts[i].y, x3: pts[i+1].x, y3: pts[i+1].y, shade, alpha });
+            }
+            return tris;
+        }
+        const tutCrystalTris1 = genTutCrystalTris(16);
+        const tutCrystalTris2 = genTutCrystalTris(16);
+
+        const CRYSTALIZE_PAGES = [
+            {
+                title: 'Crystal Prison',
+                desc: 'From level 7, a crystalize orb can trap another orb in a crystal shell. The victim is frozen and repels everything nearby.',
+                draw(t) {
+                    const cx1 = TC_W * 0.28, cx2 = TC_W * 0.72, cy = TC_H / 2, OR = 16;
+
+                    // Crystalize orb (always visible)
+                    drawOrb(cx1, cy, OR);
+                    // Diamond icon on crystalize orb
+                    tc.save();
+                    tc.strokeStyle = 'rgba(255,160,220,0.8)'; tc.lineWidth = 1;
+                    tc.translate(cx1, cy - 7);
+                    tc.beginPath();
+                    tc.moveTo(0, -7); tc.lineTo(-5, -2); tc.lineTo(-3, 2); tc.lineTo(3, 2); tc.lineTo(5, -2);
+                    tc.closePath(); tc.stroke();
+                    tc.beginPath(); tc.moveTo(-3, 2); tc.lineTo(0, 6); tc.lineTo(3, 2); tc.stroke();
+                    tc.beginPath(); tc.moveTo(0, -7); tc.lineTo(0, 6); tc.stroke();
+                    tc.restore();
+                    // Orbiting particles on crystalize orb
+                    for (let i = 0; i < 2; i++) {
+                        const a = t * TAU * 0.65 + (i / 2) * TAU;
+                        drawDot(cx1 + Math.cos(a) * OR * 1.5, cy + Math.sin(a) * OR * 1.5, 3.5, COLORS[i]);
+                    }
+
+                    // Victim orb (always visible)
+                    drawOrb(cx2, cy, OR);
+
+                    // Beam fades in at t=0.25
+                    const beamAlpha = Math.min(1, Math.max(0, (t - 0.20) / 0.10));
+
+                    // Victim particles: rotate freely until beam, then freeze
+                    const freezeAngle = 0.25 * TAU * 0.65;
+                    for (let i = 0; i < 3; i++) {
+                        const a = beamAlpha > 0.5
+                            ? freezeAngle + (i / 3) * TAU
+                            : t * TAU * 0.65 + (i / 3) * TAU;
+                        drawDot(cx2 + Math.cos(a) * OR * 1.5, cy + Math.sin(a) * OR * 1.5, 3.5, COLORS[3 + i]);
+                    }
+
+                    if (beamAlpha > 0) {
+                        // Beam
+                        tc.save();
+                        tc.globalAlpha = beamAlpha * 0.6;
+                        tc.strokeStyle = 'rgba(255,130,200,0.6)'; tc.lineWidth = 2;
+                        tc.shadowBlur = 10; tc.shadowColor = 'rgba(255,100,200,0.5)';
+                        tc.beginPath(); tc.moveTo(cx1, cy); tc.lineTo(cx2, cy); tc.stroke();
+                        // Animated energy dot along beam
+                        const beamT = (performance.now() % 1500) / 1500;
+                        const bx = cx1 + (cx2 - cx1) * beamT;
+                        tc.fillStyle = 'rgba(255,180,240,0.7)';
+                        tc.beginPath(); tc.arc(bx, cy, 2, 0, TAU); tc.fill();
+                        tc.restore();
+
+                        // Crystal overlay on victim
+                        tc.save();
+                        tc.globalAlpha = beamAlpha;
+                        tc.translate(cx2, cy);
+                        for (let i = 0; i < tutCrystalTris1.length; i++) {
+                            const tri = tutCrystalTris1[i];
+                            tc.beginPath(); tc.moveTo(tri.x1, tri.y1);
+                            tc.lineTo(tri.x2, tri.y2); tc.lineTo(tri.x3, tri.y3);
+                            tc.closePath();
+                            tc.fillStyle = `rgba(255, ${tri.shade}, 200, ${tri.alpha})`; tc.fill();
+                        }
+                        tc.restore();
+                    }
+                }
+            },
+            {
+                title: 'Break the Crystal',
+                desc: 'Fill the crystalize orb\'s recipe and fire it to shatter the crystal and free the trapped orb.',
+                draw(t) {
+                    const cx1 = TC_W * 0.28, cx2 = TC_W * 0.72, cy = TC_H / 2, OR = 16;
+                    const breakT = 0.45;
+
+                    if (t < breakT) {
+                        // Both orbs with beam and crystal
+                        drawOrb(cx1, cy, OR);
+                        // Diamond icon
+                        tc.save();
+                        tc.strokeStyle = 'rgba(255,160,220,0.8)'; tc.lineWidth = 1;
+                        tc.translate(cx1, cy - 7);
+                        tc.beginPath();
+                        tc.moveTo(0, -7); tc.lineTo(-5, -2); tc.lineTo(-3, 2); tc.lineTo(3, 2); tc.lineTo(5, -2);
+                        tc.closePath(); tc.stroke();
+                        tc.beginPath(); tc.moveTo(-3, 2); tc.lineTo(0, 6); tc.lineTo(3, 2); tc.stroke();
+                        tc.beginPath(); tc.moveTo(0, -7); tc.lineTo(0, 6); tc.stroke();
+                        tc.restore();
+                        // Recipe dots (both fulfilled)
+                        for (let i = 0; i < 2; i++) {
+                            const dx = cx1 + (i - 0.5) * 9, dy = cy + 10;
+                            tc.save(); tc.fillStyle = COLORS[i]; tc.shadowBlur = 6; tc.shadowColor = COLORS[i];
+                            tc.beginPath(); tc.arc(dx, dy, 3, 0, TAU); tc.fill();
+                            tc.strokeStyle = 'rgba(255,255,255,0.85)'; tc.lineWidth = 1;
+                            tc.beginPath(); tc.arc(dx, dy, 4.5, 0, TAU); tc.stroke();
+                            tc.restore();
+                        }
+                        // Orbiting particles (matching recipe)
+                        for (let i = 0; i < 2; i++) {
+                            const a = t * TAU * 0.65 + (i / 2) * TAU;
+                            drawDot(cx1 + Math.cos(a) * OR * 1.5, cy + Math.sin(a) * OR * 1.5, 3.5, COLORS[i]);
+                        }
+                        drawOrb(cx2, cy, OR);
+                        // Beam
+                        tc.save();
+                        tc.strokeStyle = 'rgba(255,130,200,0.5)'; tc.lineWidth = 2;
+                        tc.shadowBlur = 10; tc.shadowColor = 'rgba(255,100,200,0.4)';
+                        tc.beginPath(); tc.moveTo(cx1, cy); tc.lineTo(cx2, cy); tc.stroke();
+                        const beamT = (performance.now() % 1500) / 1500;
+                        tc.fillStyle = 'rgba(255,180,240,0.7)';
+                        tc.beginPath(); tc.arc(cx1 + (cx2 - cx1) * beamT, cy, 2, 0, TAU); tc.fill();
+                        tc.restore();
+                        // Crystal overlay on victim
+                        tc.save(); tc.translate(cx2, cy);
+                        for (let i = 0; i < tutCrystalTris2.length; i++) {
+                            const tri = tutCrystalTris2[i];
+                            tc.beginPath(); tc.moveTo(tri.x1, tri.y1);
+                            tc.lineTo(tri.x2, tri.y2); tc.lineTo(tri.x3, tri.y3);
+                            tc.closePath();
+                            tc.fillStyle = `rgba(255, ${tri.shade}, 200, ${tri.alpha})`; tc.fill();
+                        }
+                        tc.restore();
+                        // Frozen victim particles
+                        for (let i = 0; i < 3; i++) {
+                            const a = 0.3 * TAU * 0.65 + (i / 3) * TAU;
+                            drawDot(cx2 + Math.cos(a) * OR * 1.5, cy + Math.sin(a) * OR * 1.5, 3.5, COLORS[3 + i]);
+                        }
+                    } else {
+                        const et = (t - breakT) / (1 - breakT);
+                        // Crystalize orb flash (fired)
+                        if (et < 0.15) {
+                            tc.save(); tc.globalAlpha = (1 - et / 0.15) * 0.5;
+                            tc.fillStyle = 'rgba(255,180,240,0.7)';
+                            tc.beginPath(); tc.arc(cx1, cy, 30, 0, TAU); tc.fill();
+                            tc.restore();
+                        }
+                        // Crystal shards fly outward from victim
+                        if (et < 0.5) {
+                            const shardT = et / 0.5;
+                            tc.save(); tc.globalAlpha = 1 - shardT;
+                            tc.translate(cx2, cy);
+                            for (let i = 0; i < tutCrystalTris2.length; i++) {
+                                const tri = tutCrystalTris2[i];
+                                const triCx = (tri.x1 + tri.x2 + tri.x3) / 3;
+                                const triCy = (tri.y1 + tri.y2 + tri.y3) / 3;
+                                const a = Math.atan2(triCy, triCx);
+                                const d = shardT * 30;
+                                tc.save(); tc.translate(Math.cos(a) * d, Math.sin(a) * d);
+                                tc.beginPath(); tc.moveTo(tri.x1, tri.y1);
+                                tc.lineTo(tri.x2, tri.y2); tc.lineTo(tri.x3, tri.y3);
+                                tc.closePath();
+                                tc.fillStyle = `rgba(255, ${tri.shade}, 200, ${tri.alpha * 2.5})`; tc.fill();
+                                tc.restore();
+                            }
+                            tc.restore();
+                        }
+                        // Freed victim orb, particles resume orbiting
+                        drawOrb(cx2, cy, OR);
+                        for (let i = 0; i < 3; i++) {
+                            const a = (0.3 + et * 0.7) * TAU * 0.65 + (i / 3) * TAU;
+                            drawDot(cx2 + Math.cos(a) * OR * 1.5, cy + Math.sin(a) * OR * 1.5, 3.5, COLORS[3 + i]);
+                        }
+                    }
+                }
+            }
+        ];
+
         /* ── Engine ── */
         let curTutorial = null, curPage = 0, pages = [], animHandle = null, pageStart = null;
 
@@ -1068,8 +1339,10 @@
             if (curPage < pages.length - 1) {
                 showPage(curPage + 1);
             } else {
-                if (curTutorial === 'intro') localStorage.setItem('tut_intro_done', '1');
-                if (curTutorial === 'bh')    localStorage.setItem('tut_bh_done',    '1');
+                if (curTutorial === 'intro')      localStorage.setItem('tut_intro_done',      '1');
+                if (curTutorial === 'bh')         localStorage.setItem('tut_bh_done',         '1');
+                if (curTutorial === 'worm')       localStorage.setItem('tut_worm_done',       '1');
+                if (curTutorial === 'crystalize') localStorage.setItem('tut_crystalize_done', '1');
                 closeTutorial();
             }
         });
@@ -1084,12 +1357,39 @@
             curTutorial = 'bh';
             openTutorial(BH_PAGES);
         };
+        window.showWormTutorial = function(force) {
+            if (!force && localStorage.getItem('tut_worm_done')) return;
+            curTutorial = 'worm';
+            openTutorial(WORM_PAGES);
+        };
+        window.showCrystalizeTutorial = function(force) {
+            if (!force && localStorage.getItem('tut_crystalize_done')) return;
+            curTutorial = 'crystalize';
+            openTutorial(CRYSTALIZE_PAGES);
+        };
         window.resetTutorials = function() {
             localStorage.removeItem('tut_intro_done');
             localStorage.removeItem('tut_bh_done');
+            localStorage.removeItem('tut_worm_done');
+            localStorage.removeItem('tut_crystalize_done');
         };
         window.onBlackHoleSpawned = function() {
             showBHTutorial(false);
+        };
+        window.onCrystalizeHappened = function() {
+            showCrystalizeTutorial(false);
+        };
+        window.onWormIncoming = function() {
+            if (localStorage.getItem('tut_worm_done')) {
+                // Already seen tutorial — spawn after 2s directly
+                setTimeout(() => spawnWorm(), 2000);
+            } else {
+                // Show tutorial, then spawn 2s after it closes
+                window.onTutorialClosed = () => {
+                    setTimeout(() => spawnWorm(), 2000);
+                };
+                showWormTutorial(true);
+            }
         };
         window.onGameOver = function() {
             const overlay = document.getElementById('gameover-overlay');

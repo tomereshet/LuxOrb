@@ -26,11 +26,21 @@
       "Bash(keytool -genkeypair -alias luxorb -keyalg RSA -keysize 2048 -validity 10000 -keystore \"c:/Users/naama/dev/OrbGame/android/luxorb-release.keystore\" -storepass \"GLORBWasBetter\" -keypass \"GLORBWasBetter\" -dname \"CN=Tomer Eshet Arava, OU=LUXORB, O=LUXORB, L=Unknown, ST=Unknown, C=IL\")",
       "Bash(git init)",
       "Bash(git remote add origin https://github.com/tomereshet/LuxOrb.git)",
-      "Bash(git add .)"
+      "Bash(git add .)",
+      "Bash(git config user.email \"tomereshet@gmail.com\")",
+      "Bash(git config user.name \"Tomer Eshet Arava\")",
+      "Bash(git push -u origin master)",
+      "Bash(python3 -c:*)",
+      "Bash(python3 /c/Users/naama/dev/OrbGame/write_plan.py)",
+      "Bash(python3:*)",
+      "Bash(node -c game.js)",
+      "Bash(node -e \"const lockColor = [255, 130, 200]; console.log\\(''rgba\\('' + lockColor + '',0.7\\)''\\)\")",
+      "Bash(git add game.js index.html www/game.js www/index.html android/app/build.gradle android/app/src/main/res/values/strings.xml .claude/settings.local.json)"
     ],
     "additionalDirectories": [
       "C:\\Users\\naama\\.claude\\projects\\c--Users-naama-dev-OrbGame\\memory",
-      "C:\\Users\\naama\\AppData\\Local\\Android\\Sdk2\\platforms\\android-35"
+      "C:\\Users\\naama\\AppData\\Local\\Android\\Sdk2\\platforms\\android-35",
+      "C:\\Users\\naama\\.claude\\plans"
     ]
   }
 }
