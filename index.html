@@ -1329,6 +1329,151 @@
             }
         ];
 
+        const WALL_PAGES = [
+            {
+                title: 'Energy Wall',
+                desc: 'From level 9, a wall orb projects a rotating energy beam through the screen center. It repels orbs and particles.',
+                draw(t) {
+                    const cx = TC_W / 2, cy = TC_H / 2, OR = 16;
+                    const orbX = TC_W * 0.15, orbY = cy;
+                    // Wall orb
+                    drawOrb(orbX, orbY, OR);
+                    // Wall icon on orb
+                    tc.save(); tc.translate(orbX, orbY - 7);
+                    tc.strokeStyle = 'rgba(255,255,255,0.8)'; tc.lineWidth = 1;
+                    for (let i = -5; i <= 5; i++) {
+                        const sy = Math.sin(i * 0.7) * 2;
+                        i === -5 ? tc.moveTo(i, sy) : tc.lineTo(i, sy);
+                    }
+                    tc.stroke();
+                    tc.strokeStyle = 'rgba(255,255,255,0.4)'; tc.lineWidth = 1.5;
+                    tc.beginPath(); tc.moveTo(-5, 0); tc.lineTo(5, 0); tc.stroke();
+                    tc.restore();
+                    // Orbiting particles
+                    for (let i = 0; i < 2; i++) {
+                        const a = t * TAU * 0.65 + (i / 2) * TAU;
+                        drawDot(orbX + Math.cos(a) * OR * 1.5, orbY + Math.sin(a) * OR * 1.5, 3.5, COLORS[i]);
+                    }
+                    // Rotating wall beam (appears at t=0.2)
+                    const beamAlpha = Math.min(1, Math.max(0, (t - 0.2) / 0.15));
+                    if (beamAlpha > 0) {
+                        const wallAng = t * Math.PI * 0.4; // slow rotation
+                        const dx = Math.cos(wallAng), dy = Math.sin(wallAng);
+                        const nx = -dy, ny = dx;
+                        const len = 120;
+                        tc.save(); tc.globalAlpha = beamAlpha * 0.3;
+                        tc.strokeStyle = '#fff'; tc.lineWidth = 6;
+                        tc.shadowBlur = 8; tc.shadowColor = 'rgba(255,255,255,0.3)';
+                        tc.beginPath();
+                        tc.moveTo(cx - dx * len, cy - dy * len);
+                        tc.lineTo(cx + dx * len, cy + dy * len);
+                        tc.stroke(); tc.shadowBlur = 0;
+                        // Sine waves
+                        const now = performance.now() / 1000;
+                        for (let w = 0; w < 4; w++) {
+                            tc.globalAlpha = beamAlpha * 0.5;
+                            tc.strokeStyle = COLORS[w]; tc.lineWidth = 1.2;
+                            tc.beginPath();
+                            for (let s = 0; s <= 40; s++) {
+                                const st = s / 40;
+                                const px = (cx - dx * len) + dx * len * 2 * st;
+                                const py = (cy - dy * len) + dy * len * 2 * st;
+                                const along = (st - 0.5) * len * 2;
+                                const off = Math.sin(along * 0.1 + now * 2.5 + w * 1.5) * 6;
+                                const wx = px + nx * off, wy = py + ny * off;
+                                s === 0 ? tc.moveTo(wx, wy) : tc.lineTo(wx, wy);
+                            }
+                            tc.stroke();
+                        }
+                        tc.restore();
+                        // Pushed orb on other side
+                        const pushT = Math.min(1, Math.max(0, (t - 0.35) / 0.3));
+                        const poX = TC_W * 0.78 + pushT * 12;
+                        drawOrb(poX, cy - 10, OR * 0.8);
+                        for (let i = 0; i < 2; i++) {
+                            const a = t * TAU * 0.65 + (i / 2) * TAU;
+                            drawDot(poX + Math.cos(a) * OR * 1.2, (cy - 10) + Math.sin(a) * OR * 1.2, 3, COLORS[3 + i]);
+                        }
+                    }
+                }
+            },
+            {
+                title: 'Wall Control',
+                desc: 'Fire the wall orb to make the wall vanish. A new wall orb won\'t appear for 7 turns.',
+                draw(t) {
+                    const cx = TC_W / 2, cy = TC_H / 2, OR = 16;
+                    const orbX = TC_W * 0.2, orbY = cy;
+                    const sideOrbX = TC_W * 0.7, sideOrbY = cy + 10;
+                    const fireT = 0.4;
+                    // Right orb always visible
+                    drawOrb(sideOrbX, sideOrbY, OR * 0.8);
+                    for (let i = 0; i < 2; i++) {
+                        const a = t * TAU * 0.65 + (i / 2) * TAU;
+                        drawDot(sideOrbX + Math.cos(a) * OR * 1.2, sideOrbY + Math.sin(a) * OR * 1.2, 3, COLORS[3 + i]);
+                    }
+                    if (t < fireT) {
+                        // Wall orb + wall visible
+                        drawOrb(orbX, orbY, OR);
+                        tc.save(); tc.translate(orbX, orbY - 7);
+                        tc.strokeStyle = 'rgba(255,255,255,0.8)'; tc.lineWidth = 1;
+                        tc.beginPath();
+                        for (let i = -5; i <= 5; i++) {
+                            const sy = Math.sin(i * 0.7) * 2;
+                            i === -5 ? tc.moveTo(i, sy) : tc.lineTo(i, sy);
+                        }
+                        tc.stroke();
+                        tc.strokeStyle = 'rgba(255,255,255,0.4)'; tc.lineWidth = 1.5;
+                        tc.beginPath(); tc.moveTo(-5, 0); tc.lineTo(5, 0); tc.stroke();
+                        tc.restore();
+                        // Wall beam
+                        const len = 100;
+                        tc.save(); tc.globalAlpha = 0.25;
+                        tc.strokeStyle = '#fff'; tc.lineWidth = 6;
+                        tc.beginPath(); tc.moveTo(cx, cy - len); tc.lineTo(cx, cy + len); tc.stroke();
+                        const now = performance.now() / 1000;
+                        for (let w = 0; w < 4; w++) {
+                            tc.globalAlpha = 0.4;
+                            tc.strokeStyle = COLORS[w]; tc.lineWidth = 1.2;
+                            tc.beginPath();
+                            for (let s = 0; s <= 30; s++) {
+                                const st = s / 30;
+                                const py = (cy - len) + len * 2 * st;
+                                const off = Math.sin((st - 0.5) * len * 0.2 + now * 2.5 + w * 1.5) * 5;
+                                s === 0 ? tc.moveTo(cx + off, py) : tc.lineTo(cx + off, py);
+                            }
+                            tc.stroke();
+                        }
+                        tc.restore();
+                    } else {
+                        const et = (t - fireT) / (1 - fireT);
+                        // Flash when fired
+                        if (et < 0.15) {
+                            tc.save(); tc.globalAlpha = (1 - et / 0.15) * 0.4;
+                            tc.fillStyle = 'rgba(255,255,255,0.6)';
+                            tc.beginPath(); tc.arc(orbX, orbY, 25, 0, TAU); tc.fill();
+                            tc.restore();
+                        }
+                        // Wall evaporating
+                        if (et < 0.6) {
+                            const fadeT = et / 0.6;
+                            const len = 100;
+                            tc.save(); tc.globalAlpha = (1 - fadeT) * 0.2;
+                            tc.strokeStyle = '#fff'; tc.lineWidth = 6 * (1 - fadeT);
+                            tc.beginPath(); tc.moveTo(cx, cy - len); tc.lineTo(cx, cy + len); tc.stroke();
+                            // Scattered particles along beam
+                            for (let i = 0; i < 8; i++) {
+                                const py = cy - len + (i / 7) * len * 2;
+                                const drift = fadeT * 20 * (Math.sin(i * 2.3) > 0 ? 1 : -1);
+                                tc.globalAlpha = (1 - fadeT) * 0.5;
+                                drawDot(cx + drift, py, 2, COLORS[i % 6]);
+                            }
+                            tc.restore();
+                        }
+                    }
+                }
+            }
+        ];
+
         /* ── Engine ── */
         let curTutorial = null, curPage = 0, pages = [], animHandle = null, pageStart = null;
 
@@ -1386,7 +1531,8 @@
             const extras = [
                 { key: 'tut_bh_done',         level: 3, pages: BH_PAGES },
                 { key: 'tut_worm_done',       level: 5, pages: WORM_PAGES },
-                { key: 'tut_crystalize_done', level: 7, pages: CRYSTALIZE_PAGES },
+                { key: 'tut_crystalize_done', level: 9, pages: CRYSTALIZE_PAGES },
+                { key: 'tut_wall_done',       level: 9, pages: WALL_PAGES },
             ];
             let placeholderAdded = false;
             for (const ex of extras) {
@@ -1437,6 +1583,12 @@
             curTutorial = 'crystalize';
             openTutorial(CRYSTALIZE_PAGES);
         };
+        window.showWallTutorial = function(force) {
+            if (!force && localStorage.getItem('tut_wall_done')) return;
+            localStorage.setItem('tut_wall_done', '1');
+            curTutorial = 'wall';
+            openTutorial(WALL_PAGES);
+        };
         window.showHowToPlay = function() {
             curTutorial = 'howto';
             openTutorial(buildHowToPlay());
@@ -1446,6 +1598,9 @@
         };
         window.onCrystalizeHappened = function() {
             showCrystalizeTutorial(false);
+        };
+        window.onWallAppeared = function() {
+            showWallTutorial(false);
         };
         window.onWormIncoming = function() {
             if (localStorage.getItem('tut_worm_done')) {

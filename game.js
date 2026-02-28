@@ -20,7 +20,7 @@ const PALETTES = {
     colorblind: ['#E69F00', '#56B4E9', '#009E73', '#F0E442', '#0072B2', '#CC79A7']
 };
 let PARTICLE_COLORS = [...PALETTES.normal];
-const EFFECTS = ['spawn3', 'rocket', 'blip', 'fireworks', 'crystalize'];
+const EFFECTS = ['spawn3', 'rocket', 'blip', 'fireworks', 'crystalize', 'wall'];
 const CRYSTAL_CHECK_INTERVAL = 120;  // ~2s between passive attempts
 const CRYSTAL_CHANCE = 0.2;
 const CRYSTAL_PULL_STRENGTH = 0.15;
@@ -28,6 +28,14 @@ const CRYSTAL_REPEL_DIST = ORB_RADIUS * 4;    // repels orbs within 80px
 const CRYSTAL_REPEL_STR = 0.6;
 const CRYSTAL_PARTICLE_REPEL_DIST = ORB_RADIUS * 3;
 const CRYSTAL_PARTICLE_REPEL_STR = 180;        // inverse-square coeff
+const WALL_EFFECT_WIDTH = 10;
+const WALL_ROTATE_SPEED = TAU / (480 * 60); // 1 revolution per 8 min at 60fps
+const WALL_REPEL_ORB_DIST = 70;
+const WALL_REPEL_ORB_STR = 1.5;
+const WALL_REPEL_PARTICLE_DIST = 60;
+const WALL_REPEL_PARTICLE_STR = 250;
+const WALL_COOLDOWN_TURNS = 7;
+const WALL_MIN_PARTICLES = 40;
 const WORM_SEGMENT_COUNT = 15;
 const SEGMENT_SPACING = 10;
 const WORM_SPEED = 3;
@@ -54,6 +62,9 @@ let wormCooldown = 0;
 let wormSpawnChecked = false;
 let deadlockPending = false;
 let deadlockTimer = 0;  // frames since particles settled & deadlock confirmed
+let wallAngle = 0;
+let wallCooldown = 0;
+let wallActive = false;
 
 // --- Palette switching ---
 function switchPalette(name) {
@@ -92,17 +103,31 @@ function makeRecipe(size = 3) {
 
 function spawn3Chance() {
     const level = Math.floor(score / LEVEL_SIZE) + 1;
-    return 0.40 * Math.pow(0.95, level - 1);
+    return 0.40 * Math.pow(0.84, level - 1);
+}
+
+function totalParticleCount() {
+    let n = freeParticles.length;
+    for (const o of orbs) if (o.alive) n += o.particles.length;
+    return n;
 }
 
 function pickEffect() {
     if (Math.random() < spawn3Chance()) return 'spawn3';
     const blipCount = orbs.filter(o => o.alive && !o.dying && o.effect === 'blip').length;
     const currentLevel = Math.floor(score / LEVEL_SIZE) + 1;
+    const maxBlips = currentLevel >= 10 ? 4 : currentLevel >= 5 ? 3 : 2;
+    // 3% absolute chance of blip per level (on top of normal pool)
+    const blipBonus = 0.03 * currentLevel;
+    if (blipCount < maxBlips && Math.random() < blipBonus) return 'blip';
     const pool = EFFECTS.filter(e =>
         e !== 'spawn3' &&
-        !(e === 'blip' && blipCount >= 2) &&
-        !(e === 'crystalize' && currentLevel < 7)
+        !(e === 'blip' && blipCount >= maxBlips) &&
+        !(e === 'crystalize' && currentLevel < 9) &&
+        !(e === 'wall' && currentLevel < 1) &&
+        !(e === 'wall' && wallCooldown > 0) &&
+        !(e === 'wall' && orbs.some(o => o.alive && o.effect === 'wall')) &&
+        !(e === 'wall' && totalParticleCount() <= WALL_MIN_PARTICLES)
     );
     return pool[Math.floor(Math.random() * pool.length)];
 }
@@ -360,6 +385,9 @@ function init() {
     wormSpawnChecked = false;
     deadlockPending = false;
     deadlockTimer = 0;
+    wallAngle = 0;
+    wallCooldown = 0;
+    wallActive = false;
     initStars();
     const pad = 80;
     for (let i = 0; i < NUM_ORBS; i++) {
@@ -489,11 +517,13 @@ function triggerEffect(orb) {
     else if (orb.effect === 'blip')       { }
     else if (orb.effect === 'fireworks')  { effectFireworks(); }
     else if (orb.effect === 'crystalize') { releaseCrystalVictim(orb); }
+    else if (orb.effect === 'wall')       { }
 }
 
 // --- Die / explode ---
 function onOrbFired(dyingOrb) {
     if (bhCooldown > 0) bhCooldown--;
+    if (wallCooldown > 0) wallCooldown--;
     wormSpawnChecked = false;
     // Each alive blip orb drains one particle when any other orb is fired
     for (const blipOrb of orbs) {
@@ -524,6 +554,7 @@ function onOrbFired(dyingOrb) {
 function startDying(orb, dirX, dirY) {
     if (orb.crystallized) return; // crystallized victims cannot die
     if (orb.effect === 'crystalize') releaseCrystalVictim(orb);
+    if (orb.effect === 'wall') wallCooldown = WALL_COOLDOWN_TURNS;
     orb.dying = true;
     orb._dirX = dirX;
     orb._dirY = dirY;
@@ -869,6 +900,28 @@ function update() {
             }
         }
     }
+    // --- Wall activation, rotation & repulsion ---
+    const wallOrb = aliveOrbs.find(o => o.effect === 'wall' && !o.dying && !o.crystallized);
+    const wasActive = wallActive;
+    wallActive = !!wallOrb;
+    if (wallActive && !wasActive) window.onWallAppeared?.();
+    if (wallActive) {
+        wallAngle = (wallAngle + WALL_ROTATE_SPEED) % TAU;
+        const cx = cW / 2, cy = cH / 2;
+        const nx = -Math.sin(wallAngle), ny = Math.cos(wallAngle);
+        // Repel orbs from wall line
+        for (const orb of aliveOrbs) {
+            if (orb === wallOrb) continue;
+            const sd = (orb.x - cx) * nx + (orb.y - cy) * ny;
+            const absSd = Math.abs(sd);
+            if (absSd < WALL_REPEL_ORB_DIST) {
+                const f = (WALL_REPEL_ORB_DIST - absSd) / WALL_REPEL_ORB_DIST * WALL_REPEL_ORB_STR;
+                const sign = sd >= 0 ? 1 : -1;
+                orb.vx += nx * f * sign;
+                orb.vy += ny * f * sign;
+            }
+        }
+    }
     for (const orb of aliveOrbs) {
         if (orb.x < WALL_ZONE)                orb.vx += (WALL_ZONE - orb.x) / WALL_ZONE * WALL_STR;
         if (orb.x > cW  - WALL_ZONE) orb.vx -= (orb.x - (cW  - WALL_ZONE)) / WALL_ZONE * WALL_STR;
@@ -924,6 +977,20 @@ function update() {
                 const force = CRYSTAL_PARTICLE_REPEL_STR / d2;
                 p.vx += (dx / d) * force;
                 p.vy += (dy / d) * force;
+            }
+        }
+
+        // Wall repulsion for free particles
+        if (wallActive) {
+            const wcx = cW / 2, wcy = cH / 2;
+            const wnx = -Math.sin(wallAngle), wny = Math.cos(wallAngle);
+            const sd = (p.x - wcx) * wnx + (p.y - wcy) * wny;
+            const absSd = Math.abs(sd);
+            if (absSd < WALL_REPEL_PARTICLE_DIST) {
+                const f = (WALL_REPEL_PARTICLE_DIST - absSd) / WALL_REPEL_PARTICLE_DIST * 1.2;
+                const sign = sd >= 0 ? 1 : -1;
+                p.vx += wnx * f * sign;
+                p.vy += wny * f * sign;
             }
         }
 
@@ -1102,7 +1169,10 @@ function update() {
         }
     }
 
-    // --- Deadlock: wait for particles to settle, then 5s timer ---
+    // --- Deadlock: continuously check, not just on orb death ---
+    if (!deadlockPending && isDeadlocked()) {
+        deadlockPending = true;
+    }
     if (deadlockPending) {
         const settled = freeParticles.length === 0
             && !orbs.some(o => o.alive && (o.dying || o.splitting || o.spawning));
@@ -1263,6 +1333,24 @@ function drawOrb(orb) {
             ctx.beginPath();
             ctx.moveTo(-4, 3); ctx.lineTo(0, 8); ctx.lineTo(4, 3);
             ctx.stroke();
+            ctx.restore();
+
+        } else if (orb.effect === 'wall') {
+            // Horizontal line with small sine wave
+            ctx.save();
+            ctx.translate(ix, iy);
+            ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            for (let i = -7; i <= 7; i++) {
+                const sy = Math.sin(i * 0.7) * 2.5;
+                i === -7 ? ctx.moveTo(i, sy) : ctx.lineTo(i, sy);
+            }
+            ctx.stroke();
+            // Center beam line
+            ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(-7, 0); ctx.lineTo(7, 0); ctx.stroke();
             ctx.restore();
         }
 
@@ -1486,6 +1574,64 @@ function drawCrystalBeams() {
     }
 }
 
+function drawWall() {
+    const cx = cW / 2, cy = cH / 2;
+    const diag = Math.sqrt(cW * cW + cH * cH);
+    const dx = Math.cos(wallAngle), dy = Math.sin(wallAngle);
+    const nx = -dy, ny = dx; // normal
+    const x1 = cx - dx * diag, y1 = cy - dy * diag;
+    const x2 = cx + dx * diag, y2 = cy + dy * diag;
+
+    ctx.save();
+
+    // Colorful zigzags behind the beam
+    const now = performance.now() / 1000;
+    const zigzags = [
+        { color: PARTICLE_COLORS[0], amp: 10, seg: 18, speed: 6.0, seed: 0 },
+        { color: PARTICLE_COLORS[1], amp: 12, seg: 14, speed: 7.2, seed: 17 },
+        { color: PARTICLE_COLORS[2], amp: 8,  seg: 20, speed: 5.5, seed: 31 },
+        { color: PARTICLE_COLORS[3], amp: 13, seg: 12, speed: 8.0, seed: 47 },
+        { color: PARTICLE_COLORS[4], amp: 9,  seg: 16, speed: 6.8, seed: 59 },
+        { color: PARTICLE_COLORS[5], amp: 11, seg: 15, speed: 7.5, seed: 73 },
+    ];
+    for (const z of zigzags) {
+        ctx.strokeStyle = z.color;
+        ctx.globalAlpha = 0.4;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        const steps = z.seg;
+        for (let i = 0; i <= steps; i++) {
+            const t = i / steps;
+            const px = x1 + (x2 - x1) * t;
+            const py = y1 + (y2 - y1) * t;
+            // Pseudo-random zigzag: alternate direction, shift with time
+            const hash = Math.sin(i * 127.1 + z.seed) * 43758.5453;
+            const rnd = hash - Math.floor(hash); // 0-1 pseudo-random per segment
+            const dir = (i % 2 === 0 ? 1 : -1);
+            const shift = Math.sin(now * z.speed + i * 2.3 + z.seed);
+            const offset = dir * (0.4 + rnd * 0.6) * z.amp + shift * z.amp * 0.3;
+            const wx = px + nx * offset;
+            const wy = py + ny * offset;
+            i === 0 ? ctx.moveTo(wx, wy) : ctx.lineTo(wx, wy);
+        }
+        ctx.stroke();
+    }
+
+    // White beam core — gradient alpha: 1.0 center, 0 edges
+    const halfW = WALL_EFFECT_WIDTH / 2;
+    for (let s = -halfW; s <= halfW; s += 1) {
+        const alpha = 1 - Math.abs(s) / halfW;
+        ctx.strokeStyle = `rgba(255,255,255,${alpha.toFixed(3)})`;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x1 + nx * s, y1 + ny * s);
+        ctx.lineTo(x2 + nx * s, y2 + ny * s);
+        ctx.stroke();
+    }
+
+    ctx.restore();
+}
+
 function drawBlackHole(bh) {
     const R = ORB_RADIUS;
     // Body
@@ -1603,6 +1749,7 @@ function draw() {
         ctx.restore();
     }
     drawCrystalBeams();
+    if (wallActive) drawWall();
     if (blackHole) drawBlackHole(blackHole);
     if (worm && worm.alive) drawWorm(worm);
 
