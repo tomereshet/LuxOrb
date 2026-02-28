@@ -52,6 +52,8 @@ let blipToast = null; // { x, y, vy, alpha }
 let worm = null;       // { segments[], targetX, targetY, headAngle, speed, alive, spawnAlpha, age }
 let wormCooldown = 0;
 let wormSpawnChecked = false;
+let deadlockPending = false;
+let deadlockTimer = 0;  // frames since particles settled & deadlock confirmed
 
 // --- Palette switching ---
 function switchPalette(name) {
@@ -99,7 +101,7 @@ function pickEffect() {
     const currentLevel = Math.floor(score / LEVEL_SIZE) + 1;
     const pool = EFFECTS.filter(e =>
         e !== 'spawn3' &&
-        !(e === 'blip' && blipCount >= 3) &&
+        !(e === 'blip' && blipCount >= 2) &&
         !(e === 'crystalize' && currentLevel < 7)
     );
     return pool[Math.floor(Math.random() * pool.length)];
@@ -356,6 +358,8 @@ function init() {
     worm = null;
     wormCooldown = 0;
     wormSpawnChecked = false;
+    deadlockPending = false;
+    deadlockTimer = 0;
     initStars();
     const pad = 80;
     for (let i = 0; i < NUM_ORBS; i++) {
@@ -482,7 +486,7 @@ function triggerEffect(orb) {
     updateHUD();
     if      (orb.effect === 'spawn3')     { spawnOrb(orb.x, orb.y); spawnOrb(orb.x, orb.y); spawnOrb(orb.x, orb.y); }
     else if (orb.effect === 'rocket')     { effectRocket(); }
-    else if (orb.effect === 'blip')       { effectBlip(); }
+    else if (orb.effect === 'blip')       { }
     else if (orb.effect === 'fireworks')  { effectFireworks(); }
     else if (orb.effect === 'crystalize') { releaseCrystalVictim(orb); }
 }
@@ -563,7 +567,9 @@ function completeDeath(orb) {
     if (!blackHole && bhCooldown === 0 && currentLevel >= 3 && orbs.filter(o => o.alive).length > 0 && Math.random() < 0.25) {
         spawnBlackHole();
     }
-    if (isDeadlocked()) setTimeout(() => window.onGameOver?.(), 3000);
+    if (isDeadlocked() && !deadlockPending) {
+        deadlockPending = true;
+    }
 }
 
 // --- Input ---
@@ -592,6 +598,8 @@ function onPointerUp() {
         const recipeLocked = (drag.orb.effect === 'blip' || drag.orb.effect === 'crystalize') && !isRecipeFulfilled(drag.orb);
         if (drag.orb.crystallized) {
             // Crystallized orbs can't be fired — crystal makes it obvious
+        } else if (drag.orb.overloadPhase) {
+            // Overloading orbs can't be fired until overload finishes
         } else if (!recipeLocked) {
             startDying(drag.orb, dx / len, dy / len);
         } else {
@@ -1093,6 +1101,24 @@ function update() {
             }
         }
     }
+
+    // --- Deadlock: wait for particles to settle, then 5s timer ---
+    if (deadlockPending) {
+        const settled = freeParticles.length === 0
+            && !orbs.some(o => o.alive && (o.dying || o.splitting || o.spawning));
+        if (settled && isDeadlocked()) {
+            deadlockTimer++;
+            if (deadlockTimer >= 300) {  // 5 seconds at 60fps
+                deadlockPending = false;
+                deadlockTimer = 0;
+                window.onGameOver?.();
+            }
+        } else {
+            // Conditions no longer met — reset
+            deadlockPending = false;
+            deadlockTimer = 0;
+        }
+    }
 }
 
 // --- Draw ---
@@ -1256,6 +1282,7 @@ function drawOrb(orb) {
         ctx.beginPath();
         ctx.arc(dotX, dotY, 3, 0, TAU);
         ctx.fill();
+        drawParticleTexture(ctx, dotX, dotY, 3, c);
         if (fulfilled) {
             ctx.shadowBlur = 0;
             ctx.strokeStyle = 'rgba(255,255,255,0.85)';
@@ -1292,7 +1319,43 @@ function drawParticle(x, y, color, glowColor = color, glowBlur = 12) {
     ctx.beginPath();
     ctx.arc(x, y, PARTICLE_RADIUS, 0, TAU);
     ctx.fill();
+
+    drawParticleTexture(ctx, x, y, PARTICLE_RADIUS, color);
     ctx.restore();
+}
+
+function drawParticleTexture(c, x, y, radius, color) {
+    const ci = PARTICLE_COLORS.indexOf(color);
+    if (ci < 0) return;
+    c.save();
+    c.shadowBlur = 0;
+    c.strokeStyle = 'rgba(0,0,0,0.35)';
+    c.fillStyle = 'rgba(0,0,0,0.35)';
+    c.lineWidth = 1;
+    const r = radius * 0.55;
+    switch (ci) {
+        case 0: // cross +
+            c.beginPath(); c.moveTo(x - r, y); c.lineTo(x + r, y); c.stroke();
+            c.beginPath(); c.moveTo(x, y - r); c.lineTo(x, y + r); c.stroke();
+            break;
+        case 1: // diamond
+            c.beginPath(); c.moveTo(x, y - r); c.lineTo(x + r, y); c.lineTo(x, y + r); c.lineTo(x - r, y); c.closePath(); c.stroke();
+            break;
+        case 2: // horizontal line
+            c.beginPath(); c.moveTo(x - r, y); c.lineTo(x + r, y); c.stroke();
+            break;
+        case 3: // triangle
+            c.beginPath(); c.moveTo(x, y - r); c.lineTo(x + r, y + r * 0.7); c.lineTo(x - r, y + r * 0.7); c.closePath(); c.stroke();
+            break;
+        case 4: // X
+            c.beginPath(); c.moveTo(x - r, y - r); c.lineTo(x + r, y + r); c.stroke();
+            c.beginPath(); c.moveTo(x + r, y - r); c.lineTo(x - r, y + r); c.stroke();
+            break;
+        case 5: // dot
+            c.beginPath(); c.arc(x, y, r * 0.45, 0, TAU); c.fill();
+            break;
+    }
+    c.restore();
 }
 
 function drawSplittingOrb(orb) {
@@ -1469,7 +1532,7 @@ function drawAimLine() {
     const tipX = drag.x;
     const tipY = drag.y;
 
-    const isLocked = drag.orb.crystallized || ((drag.orb.effect === 'blip' || drag.orb.effect === 'crystalize') && !isRecipeFulfilled(drag.orb));
+    const isLocked = drag.orb.crystallized || drag.orb.overloadPhase || ((drag.orb.effect === 'blip' || drag.orb.effect === 'crystalize') && !isRecipeFulfilled(drag.orb));
     const lockColor = drag.orb.crystallized ? [255, 130, 200] : [255, 80, 80];
     const lineColor  = isLocked ? `rgba(${lockColor},0.7)`  : 'rgba(255, 255, 255, 0.55)';
     const arrowColor = isLocked ? `rgba(${lockColor},0.85)` : 'rgba(255, 255, 255, 0.75)';
@@ -1557,6 +1620,7 @@ function draw() {
         ctx.beginPath();
         ctx.arc(d.x, d.y, d.r, 0, TAU);
         ctx.fill();
+        drawParticleTexture(ctx, d.x, d.y, d.r, d.color);
         ctx.restore();
     }
 

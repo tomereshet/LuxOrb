@@ -76,6 +76,30 @@
             min-width: 44px;
         }
         /* ── Settings button (pinned to right of header) ── */
+        #help-btn {
+            position: absolute;
+            right: 52px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            border: 1.5px solid rgba(255,255,255,0.4);
+            background: transparent;
+            color: rgba(255,255,255,0.75);
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+            transition: border-color 0.15s, color 0.15s;
+        }
+        #help-btn:hover {
+            border-color: rgba(255,255,255,0.9);
+            color: rgba(255,255,255,1);
+        }
         #settings-btn {
             position: absolute;
             right: 14px;
@@ -224,6 +248,7 @@
             text-align: center;
             line-height: 1.55;
             max-width: 270px;
+            min-height: 65px;
         }
         #tut-dots-row {
             display: flex; gap: 7px; align-items: center;
@@ -427,6 +452,7 @@
             <span id="points-label">0 pts</span>
             <span id="best-label">BEST 0</span>
         </div>
+        <button id="help-btn" title="How to Play">?</button>
         <button id="settings-btn" title="Settings">&#9881;</button>
     </div>
 
@@ -437,11 +463,6 @@
                 <input type="checkbox" id="cb-toggle">
                 <span class="slider"></span>
             </label>
-        </div>
-        <div class="settings-sep"></div>
-        <div class="settings-action" id="reset-tut-btn">
-            <span>Reset tutorials</span>
-            <span style="font-size:15px">↺</span>
         </div>
     </div>
 
@@ -466,11 +487,6 @@
                         <input type="checkbox" id="menu-cb-toggle">
                         <span class="slider"></span>
                     </label>
-                </div>
-                <div class="settings-sep" style="width:100%"></div>
-                <div class="settings-action" style="width:100%" id="menu-reset-tut-btn">
-                    <span>Reset tutorials</span>
-                    <span style="font-size:15px">&#8635;</span>
                 </div>
                 <button class="menu-btn" id="menu-back-btn" style="margin-top:6px">&#8592;&ensp;Back</button>
             </div>
@@ -521,10 +537,8 @@
             switchPalette(e.target.checked ? 'colorblind' : 'normal');
         });
         document.getElementById('reset-btn').addEventListener('click', () => init());
-        document.getElementById('reset-tut-btn').addEventListener('click', () => {
-            resetTutorials();
-            settingsPanel.classList.remove('open');
-            showIntroTutorial(true);
+        document.getElementById('help-btn').addEventListener('click', () => {
+            window.showHowToPlay?.();
         });
     </script>
 
@@ -584,6 +598,26 @@
             tc.save();
             tc.shadowBlur = 9; tc.shadowColor = color; tc.fillStyle = color;
             tc.beginPath(); tc.arc(x, y, r, 0, TAU); tc.fill();
+            tc.restore();
+            drawDotTexture(x, y, r, color);
+        }
+        function drawDotTexture(x, y, radius, color) {
+            const ci = COLORS.indexOf(color);
+            if (ci < 0) return;
+            tc.save();
+            tc.shadowBlur = 0;
+            tc.strokeStyle = 'rgba(0,0,0,0.35)';
+            tc.fillStyle = 'rgba(0,0,0,0.35)';
+            tc.lineWidth = 1;
+            const r = radius * 0.55;
+            switch (ci) {
+                case 0: tc.beginPath(); tc.moveTo(x-r,y); tc.lineTo(x+r,y); tc.stroke(); tc.beginPath(); tc.moveTo(x,y-r); tc.lineTo(x,y+r); tc.stroke(); break;
+                case 1: tc.beginPath(); tc.moveTo(x,y-r); tc.lineTo(x+r,y); tc.lineTo(x,y+r); tc.lineTo(x-r,y); tc.closePath(); tc.stroke(); break;
+                case 2: tc.beginPath(); tc.moveTo(x-r,y); tc.lineTo(x+r,y); tc.stroke(); break;
+                case 3: tc.beginPath(); tc.moveTo(x,y-r); tc.lineTo(x+r,y+r*0.7); tc.lineTo(x-r,y+r*0.7); tc.closePath(); tc.stroke(); break;
+                case 4: tc.beginPath(); tc.moveTo(x-r,y-r); tc.lineTo(x+r,y+r); tc.stroke(); tc.beginPath(); tc.moveTo(x+r,y-r); tc.lineTo(x-r,y+r); tc.stroke(); break;
+                case 5: tc.beginPath(); tc.arc(x, y, r*0.45, 0, TAU); tc.fill(); break;
+            }
             tc.restore();
         }
 
@@ -680,6 +714,7 @@
                         tc.save();
                         tc.fillStyle = recipe[i]; tc.shadowBlur = 5; tc.shadowColor = recipe[i];
                         tc.beginPath(); tc.arc(dotX, dotY, 3, 0, TAU); tc.fill();
+                        drawDotTexture(dotX, dotY, 3, recipe[i]);
                         if (i < nFilled) {
                             tc.strokeStyle = 'rgba(255,255,255,0.85)'; tc.lineWidth = 1; tc.shadowBlur = 0;
                             tc.beginPath(); tc.arc(dotX, dotY, 4.5, 0, TAU); tc.stroke();
@@ -783,7 +818,7 @@
             },
             {
                 title: 'blip — Particle Blink',
-                desc: 'Each time another orb is fired, a particle from a random orb blips out of existence. The blip cannot launch until its recipe is full.',
+                desc: 'When another orb is fired, a random particle may blip out. Fill its recipe to launch it.',
                 draw(t) {
                     const bx = TC_W*0.30, by = TC_H/2, OR = 16;
                     const vx = TC_W*0.72, vy = TC_H/2, vOR = 13*1.5;
@@ -1219,6 +1254,7 @@
                             const dx = cx1 + (i - 0.5) * 9, dy = cy + 10;
                             tc.save(); tc.fillStyle = COLORS[i]; tc.shadowBlur = 6; tc.shadowColor = COLORS[i];
                             tc.beginPath(); tc.arc(dx, dy, 3, 0, TAU); tc.fill();
+                            drawDotTexture(dx, dy, 3, COLORS[i]);
                             tc.strokeStyle = 'rgba(255,255,255,0.85)'; tc.lineWidth = 1;
                             tc.beginPath(); tc.arc(dx, dy, 4.5, 0, TAU); tc.stroke();
                             tc.restore();
@@ -1339,13 +1375,44 @@
             if (curPage < pages.length - 1) {
                 showPage(curPage + 1);
             } else {
-                if (curTutorial === 'intro')      localStorage.setItem('tut_intro_done',      '1');
-                if (curTutorial === 'bh')         localStorage.setItem('tut_bh_done',         '1');
-                if (curTutorial === 'worm')       localStorage.setItem('tut_worm_done',       '1');
-                if (curTutorial === 'crystalize') localStorage.setItem('tut_crystalize_done', '1');
+                if (curTutorial === 'intro') localStorage.setItem('tut_intro_done', '1');
                 closeTutorial();
             }
         });
+
+        // Build full How to Play pages: INTRO + unlocked extras in order + one placeholder for next locked
+        function buildHowToPlay() {
+            const all = [...INTRO];
+            const extras = [
+                { key: 'tut_bh_done',         level: 3, pages: BH_PAGES },
+                { key: 'tut_worm_done',       level: 5, pages: WORM_PAGES },
+                { key: 'tut_crystalize_done', level: 7, pages: CRYSTALIZE_PAGES },
+            ];
+            let placeholderAdded = false;
+            for (const ex of extras) {
+                if (localStorage.getItem(ex.key)) {
+                    all.push(...ex.pages);
+                } else if (!placeholderAdded) {
+                    placeholderAdded = true;
+                    const lvl = ex.level;
+                    all.push({
+                        title: '???',
+                        desc: 'Unlocks at level ' + lvl,
+                        draw() {
+                            tc.save();
+                            tc.fillStyle = 'rgba(255,255,255,0.08)';
+                            tc.fillRect(0, 0, TC_W, TC_H);
+                            tc.font = 'bold 28px system-ui, sans-serif';
+                            tc.textAlign = 'center'; tc.textBaseline = 'middle';
+                            tc.fillStyle = 'rgba(255,255,255,0.18)';
+                            tc.fillText('?', TC_W / 2, TC_H / 2);
+                            tc.restore();
+                        }
+                    });
+                }
+            }
+            return all;
+        }
 
         window.showIntroTutorial = function(force) {
             if (!force && localStorage.getItem('tut_intro_done')) return;
@@ -1354,24 +1421,25 @@
         };
         window.showBHTutorial = function(force) {
             if (!force && localStorage.getItem('tut_bh_done')) return;
+            localStorage.setItem('tut_bh_done', '1');
             curTutorial = 'bh';
             openTutorial(BH_PAGES);
         };
         window.showWormTutorial = function(force) {
             if (!force && localStorage.getItem('tut_worm_done')) return;
+            localStorage.setItem('tut_worm_done', '1');
             curTutorial = 'worm';
             openTutorial(WORM_PAGES);
         };
         window.showCrystalizeTutorial = function(force) {
             if (!force && localStorage.getItem('tut_crystalize_done')) return;
+            localStorage.setItem('tut_crystalize_done', '1');
             curTutorial = 'crystalize';
             openTutorial(CRYSTALIZE_PAGES);
         };
-        window.resetTutorials = function() {
-            localStorage.removeItem('tut_intro_done');
-            localStorage.removeItem('tut_bh_done');
-            localStorage.removeItem('tut_worm_done');
-            localStorage.removeItem('tut_crystalize_done');
+        window.showHowToPlay = function() {
+            curTutorial = 'howto';
+            openTutorial(buildHowToPlay());
         };
         window.onBlackHoleSpawned = function() {
             showBHTutorial(false);
@@ -1447,22 +1515,13 @@
         });
 
         document.getElementById('menu-howto-btn').addEventListener('click', () => {
-            closeMenu();
-            window.onTutorialClosed = () => { menu.classList.remove('fading', 'hidden'); };
-            setTimeout(() => showIntroTutorial(true), 400);
+            menu.classList.add('fading');
+            window.onTutorialClosed = () => { menu.classList.remove('fading'); };
+            setTimeout(() => window.showHowToPlay(), 400);
         });
 
         document.getElementById('menu-settings-nav-btn').addEventListener('click', showSettingsView);
         document.getElementById('menu-back-btn').addEventListener('click', showMainView);
-
-        document.getElementById('menu-reset-tut-btn').addEventListener('click', () => {
-            resetTutorials();
-            // brief visual feedback
-            const el = document.getElementById('menu-reset-tut-btn');
-            const orig = el.querySelector('span').textContent;
-            el.querySelector('span').textContent = 'Done!';
-            setTimeout(() => el.querySelector('span').textContent = orig, 1200);
-        });
 
         /* keep colorblind toggles in sync */
         menuCbToggle.addEventListener('change', (e) => {
